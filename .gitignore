@@ -1,0 +1,41 @@
+# ============================
+# Python
+# ============================
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+*.pyo
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE/editor settings
+.vscode/
+.idea/
+*.swp
+
+# ============================
+# Jupyter Notebooks
+# ============================
+.ipynb_checkpoints/
+
+# ============================
+# Data / results (optional)
+# ============================
+# Ignore large raw data, but keep small result CSVs you want to push
+data/*.json
+data/*.npz
+data/*.npy
+data/*.pkl
+data/*.log
+data/*.tmp
+
+# ============================
+# OS / misc
+# ============================
+.DS_Store
+Thumbs.db
