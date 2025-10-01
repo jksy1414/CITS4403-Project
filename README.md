@@ -21,6 +21,7 @@ python -m venv .venv
 ### 2. Install dependencies
 Install all required Python packages:
 Dependencies included:
+
 ```
 numpy - for grid operations
 matplotlib - for plotting results
