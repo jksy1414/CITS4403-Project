@@ -19,10 +19,9 @@ python -m venv .venv
 .\.venv\Scripts\activate
 ```
 ### 2. Install dependencies
-```
 Install all required Python packages:
 Dependencies included:
-
+```
 numpy - for grid operations
 matplotlib - for plotting results
 pandas - for analysing results
