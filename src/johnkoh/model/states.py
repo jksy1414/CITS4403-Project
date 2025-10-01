@@ -25,3 +25,7 @@ class Params:
     # Initial posters
     seeds_f0: int = 20
     seeds_r0: int = 10
+
+     # New: correction parameters
+    gamma_correction: float = 0.7   # seeing real lowers chance to share fake
+    gamma_switch: float = 0.3       # posters of fake may switch to real

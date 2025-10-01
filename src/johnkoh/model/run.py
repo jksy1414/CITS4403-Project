@@ -7,7 +7,8 @@ def _timestamp():
 
 def main():
     # 1. set up parameters (you can tweak later)
-    p = Params(N=50, T=20, seeds_f0=5, seeds_r0=2)
+    p = Params(N=50, T=20, seeds_f0=5, seeds_r0=5,gamma_correction=0.7, gamma_switch=0.3)
+    out = simulate(p)
     
     # 2. run the simulation
     out = simulate(p)
@@ -29,10 +30,11 @@ def main():
     print(f"Results saved → {filename}")
 
     # 5. print friendly summary
-    peak_f = max(out["I_f"]) if out["I_f"] else 0
-    peak_r = max(out["I_r"]) if out["I_r"] else 0
-    print(f"Peak fake posters: {peak_f}")
-    print(f"Peak real posters: {peak_r}")
+    print("Results:")
+    print(f"Peak fake posters: {max(out['I_f'])}, Peak real posters: {max(out['I_r'])}")
+    print(f"Total shares — Fake: {out['cum_shares_f']}, Real: {out['cum_shares_r']}")
+    print(f"Total switches (fake→real): {sum(out['switches'])}")
+    print(f"Reach — Fake: {out['reach_fake']:.2%}, Real: {out['reach_real']:.2%}")
 
 if __name__ == "__main__":
     main()
