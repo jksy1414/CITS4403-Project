@@ -1,5 +1,6 @@
 from enum import IntEnum
 from dataclasses import dataclass
+from typing import Optional
 
 # Basic cell states (kept small/int for speed later)
 class State(IntEnum):
@@ -15,7 +16,7 @@ class Params:
     # World / timing
     N: int = 100      # grid N x N (population size for CA)
     T: int = 200      # number of time steps
-    rng_seed: int = 42
+    rng_seed: Optional[int] = None  # None => random seed each run
 
     # Behaviour (simple first)
     beta_see: float = 0.35
