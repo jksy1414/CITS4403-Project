@@ -1,5 +1,3 @@
-# src/johnkoh/model/simulate.py
-
 import time
 import numpy as np
 from .states import State, Params
@@ -127,29 +125,39 @@ def simulate(p: Params) -> dict:
     # initial grid & seeds
     state = seed_initial(p.N, p.seeds_f0, p.seeds_r0, rng)
 
-    # time series
+    # macro time series
     I_f, I_r = [], []
     shares_f, shares_r = [], []
     switches = []
 
-    # reach tracking (ever seen F/R)
+    # reach tracking (ever seen F/R)(macro)
     ever_fake = np.zeros((p.N, p.N), dtype=bool)
     ever_real = np.zeros((p.N, p.N), dtype=bool)
 
+    # --- NEW: micro snapshots ---
+    snapshots = {}
+    snapshot_steps = sorted(set([0, p.T // 4, p.T // 2, p.T - 1]))
+
     for _ in range(p.T):
-        # snapshot of current posters
+        t = len(I_f)  # current step (0-based)
+
+        # capture current grid BEFORE moving one step
+        if t in snapshot_steps:
+            snapshots[f"t{t}"] = state.copy().tolist()
+
+        # macro snapshots (counts before stepping)
         I_f.append(int((state == State.I_F).sum()))
         I_r.append(int((state == State.I_R).sum()))
 
-        # one tick; include pre-decay exposure flags
+        # advance one step
         state, sf_mask, sr_mask, sw_mask, seenF, seenR = step(state, p, rng)
 
-        # flows and switches this tick
+        # flows this tick (macro)
         shares_f.append(int(np.count_nonzero(sf_mask)))
         shares_r.append(int(np.count_nonzero(sr_mask)))
         switches.append(int(np.count_nonzero(sw_mask)))
 
-        # reach uses pre-decay exposures so brief exposures still count
+        # reach accumulators (macro)
         ever_fake |= seenF
         ever_real |= seenR
 
@@ -164,4 +172,5 @@ def simulate(p: Params) -> dict:
         "reach_fake": float(ever_fake.mean()),
         "reach_real": float(ever_real.mean()),
         "seed_used": seed_used,
+        "grid_snapshots": snapshots,  # <-- NEW (micro)
     }
