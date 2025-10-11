@@ -7,6 +7,8 @@ __pycache__/
 *.egg
 *.egg-info/
 *.pyo
+*.json
+*.pyc
 
 # Virtual environments
 .venv/
@@ -33,6 +35,8 @@ data/*.npy
 data/*.pkl
 data/*.log
 data/*.tmp
+data/**
+!data/**/README.md
 
 # ============================
 # OS / misc
