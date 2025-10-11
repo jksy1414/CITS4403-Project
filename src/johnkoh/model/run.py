@@ -9,15 +9,15 @@ def main():
     # 1. set up parameters (you can tweak later)
     p = Params(
         N=50, T=60,
-        seeds_f0=6, seeds_r0=5,       # tiny nudge to help early fake
-        beta_see=0.30,                 # ↓ visibility to avoid 99% reach
-        beta_share_f=0.58,             # fake catchier
-        beta_share_r=0.46,             # real still spreads well
-        gamma_correction=0.45,         # correction works but not crushing
-        gamma_switch=0.12,             # fewer flips than 0.3
-        delta_decay_f=0.12,            # fake fades faster
-        delta_decay_r=0.06,
-        rng_seed=None,  # <-- random each run
+        seeds_f0=6, seeds_r0=5,        # tiny nudge to help early fake
+        beta_see=0.25,                 # ↓ visibility to avoid 99% reach
+        beta_share_f=0.60,             # fake catchier
+        beta_share_r=0.44,             # real still spreads well
+        gamma_correction=0.35,         # correction works but not crushing
+        gamma_switch=0.08,             # fewer flips than 0.3
+        delta_decay_f=0.14,            # fake fades faster
+        delta_decay_r=0.10,
+        rng_seed=None,                 # <-- random each run
     )
     # 2. run the simulation
     out = simulate(p)
