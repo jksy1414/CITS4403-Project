@@ -18,15 +18,19 @@ class Params:
     T: int = 200      # number of time steps
     rng_seed: Optional[int] = None  # None => random seed each run
 
-    # Behaviour (simple first)
+    # Behaviour probabilities
     beta_see: float = 0.35
     beta_share_f: float = 0.50
     beta_share_r: float = 0.40
 
-    # Initial posters
+    # Initial posters conditions
     seeds_f0: int = 20
     seeds_r0: int = 10
 
-     # New: correction parameters
+     # Correction / switch mechanics
     gamma_correction: float = 0.7   # seeing real lowers chance to share fake
     gamma_switch: float = 0.3       # posters of fake may switch to real
+
+    # Natural decay of attention (forgetting)
+    delta_decay_f: float = 0.12  # fake forgets faster
+    delta_decay_r: float = 0.06  # real forgets slower

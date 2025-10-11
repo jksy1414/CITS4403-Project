@@ -1,3 +1,5 @@
+# src/johnkoh/model/simulate.py
+
 import time
 import numpy as np
 from .states import State, Params
@@ -20,13 +22,17 @@ def seed_initial(N: int, seeds_f0: int, seeds_r0: int, rng: np.random.Generator)
 
 def step(state: np.ndarray, p: Params, rng: np.random.Generator):
     """
-    ONE TICK with minimal rules + correction/switching:
+    ONE TICK with minimal rules + correction/switching + decay:
       - S who see F/R -> E_F / E_R
-      - E_F / E_R may share -> I_F / I_R (we record these as share events)
+      - E_F / E_R may share -> I_F / I_R (share events)
       - I_F may switch to I_R (gamma_switch)
       - Posters last one tick -> drop to E_* (if not switched)
+      - E_* may forget back to S (asymmetric decay)
+
     Returns:
-      next_state, share_f_mask, share_r_mask, switch_mask
+      next_state,
+      share_f_mask, share_r_mask, switch_mask,
+      predec_fake, predec_real   # who was E/I before decay (for reach)
     """
     N = state.shape[0]
     next_state = state.copy()
@@ -49,21 +55,18 @@ def step(state: np.ndarray, p: Params, rng: np.random.Generator):
     next_state[s_mask & sees_f] = State.E_F
     next_state[s_mask & sees_r] = State.E_R
 
-    # --- correction: if exposed to fake and also see real, reduce fake share prob
-    # base sharing probabilities
+    # --- correction: if exposed to fake and also saw real, reduce fake share prob
     share_f_prob = p.beta_share_f
     share_r_prob = p.beta_share_r
 
-    # reduce fake sharing for those exposed-to-fake who also saw real this tick
+    # exposed to fake AND saw real this tick
     ef_and_saw_real = ef_mask & sees_r
-    # apply reduction only to those cells; everyone else keeps base prob
-    # draw a fresh matrix of uniforms for E_F
+
+    # E_F share draw (single uniform field), then adjust corrected cells by lowering threshold
     u_f = rng.random((N, N))
     share_f_mask = ef_mask & (u_f < share_f_prob)
     if p.gamma_correction > 0.0:
-        # re-evaluate for corrected group with reduced probability
         reduced_prob = share_f_prob * (1.0 - p.gamma_correction)
-        # remove previously marked shares in corrected group, then redraw for those group cells
         share_f_mask[ef_and_saw_real] = (u_f[ef_and_saw_real] < reduced_prob)
 
     # E_R share to I_R
@@ -81,7 +84,20 @@ def step(state: np.ndarray, p: Params, rng: np.random.Generator):
     next_state[if_mask & ~switch_mask] = State.E_F
     next_state[ir_mask] = State.E_R
 
-    return next_state, share_f_mask, share_r_mask, switch_mask
+    # --- capture reach BEFORE decay so brief exposures still count
+    predec_fake = (next_state == State.E_F) | (next_state == State.I_F)
+    predec_real = (next_state == State.E_R) | (next_state == State.I_R)
+
+    # Asymmetric decay of interest (natural forgetting) AFTER we recorded reach
+    if p.delta_decay_f > 0.0:
+        dropF = (next_state == State.E_F) & (rng.random((N, N)) < p.delta_decay_f)
+        next_state[dropF] = State.S
+
+    if p.delta_decay_r > 0.0:
+        dropR = (next_state == State.E_R) & (rng.random((N, N)) < p.delta_decay_r)
+        next_state[dropR] = State.S
+
+    return next_state, share_f_mask, share_r_mask, switch_mask, predec_fake, predec_real
 
 
 def simulate(p: Params) -> dict:
@@ -102,8 +118,7 @@ def simulate(p: Params) -> dict:
     """
     # choose seed
     if p.rng_seed is None:
-        # time-based 32-bit seed (different each run)
-        seed_used = int(time.time_ns() & 0xFFFFFFFF)
+        seed_used = int(time.time_ns() & 0xFFFFFFFF)  # time-based 32-bit seed
     else:
         seed_used = int(p.rng_seed)
 
@@ -122,19 +137,21 @@ def simulate(p: Params) -> dict:
     ever_real = np.zeros((p.N, p.N), dtype=bool)
 
     for _ in range(p.T):
-        # record current posters (snapshot)
+        # snapshot of current posters
         I_f.append(int((state == State.I_F).sum()))
         I_r.append(int((state == State.I_R).sum()))
 
-        # advance one tick; capture new shares and switches (flow)
-        state, sf_mask, sr_mask, sw_mask = step(state, p, rng)
+        # one tick; include pre-decay exposure flags
+        state, sf_mask, sr_mask, sw_mask, seenF, seenR = step(state, p, rng)
+
+        # flows and switches this tick
         shares_f.append(int(np.count_nonzero(sf_mask)))
         shares_r.append(int(np.count_nonzero(sr_mask)))
         switches.append(int(np.count_nonzero(sw_mask)))
 
-        # update reach after state transition
-        ever_fake |= (state == State.E_F) | (state == State.I_F)
-        ever_real |= (state == State.E_R) | (state == State.I_R)
+        # reach uses pre-decay exposures so brief exposures still count
+        ever_fake |= seenF
+        ever_real |= seenR
 
     return {
         "I_f": I_f,

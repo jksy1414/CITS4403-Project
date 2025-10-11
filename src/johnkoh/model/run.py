@@ -8,10 +8,15 @@ def _timestamp():
 def main():
     # 1. set up parameters (you can tweak later)
     p = Params(
-        N=50, T=20,
-        seeds_f0=5, seeds_r0=5,
-        beta_see=0.35, beta_share_f=0.50, beta_share_r=0.40,
-        gamma_correction=0.7, gamma_switch=0.3,
+        N=50, T=60,
+        seeds_f0=6, seeds_r0=5,       # tiny nudge to help early fake
+        beta_see=0.30,                 # ↓ visibility to avoid 99% reach
+        beta_share_f=0.58,             # fake catchier
+        beta_share_r=0.46,             # real still spreads well
+        gamma_correction=0.45,         # correction works but not crushing
+        gamma_switch=0.12,             # fewer flips than 0.3
+        delta_decay_f=0.12,            # fake fades faster
+        delta_decay_r=0.06,
         rng_seed=None,  # <-- random each run
     )
     # 2. run the simulation
@@ -46,6 +51,11 @@ def main():
     if "reach_fake" in out:
         print(f"Reach — Fake: {out['reach_fake']:.2%}, Real: {out['reach_real']:.2%}")
     print(f"Total shares — Fake: {totals['shares_fake']}, Real: {totals['shares_real']}")
+    peak_f = max(out["I_f"]) if out["I_f"] else 0
+    peak_r = max(out["I_r"]) if out["I_r"] else 0
+    t_peak_f = out["I_f"].index(peak_f) if peak_f else None
+    t_peak_r = out["I_r"].index(peak_r) if peak_r else None
+    print(f"Time to peak — Fake: {t_peak_f}, Real: {t_peak_r}")
 
 if __name__ == "__main__":
     main()
