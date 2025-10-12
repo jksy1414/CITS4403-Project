@@ -52,6 +52,9 @@ class Params:
     macro_hetero: bool = False         # M5 - not implemented yet
     macro_spatial: bool = False        # M6 - not implemented yet
 
+    # --- refractory configuration ---
+    tau_post: int = 3  # NEW: number of ticks a poster is 'locked'
+    
     def __post_init__(self):
         if self.N <= 0 or self.T <= 0:
             raise ValueError("N and T must be positive.")
