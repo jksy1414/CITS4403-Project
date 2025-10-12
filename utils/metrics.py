@@ -9,22 +9,24 @@ def summarise(run: Dict[str, Any]) -> Dict[str, Any]:
     shares_r = run.get("shares_r", []) or []
     reach_fake = float(run.get("reach_fake", 0.0) or 0.0)
     reach_real = float(run.get("reach_real", 0.0) or 0.0)
+    # Normalize to proportions (0–1) if a percent slipped in
+    if reach_fake > 1.0: reach_fake /= 100.0
+    if reach_real > 1.0: reach_real /= 100.0
 
     peak_f = max(I_f) if I_f else 0
     peak_r = max(I_r) if I_r else 0
-    t_peak_f = (I_f.index(peak_f) if I_f and peak_f in I_f else None)
-    t_peak_r = (I_r.index(peak_r) if I_r and peak_r in I_r else None)
+    t_peak_f = (I_f.index(peak_f) if I_f and (peak_f in I_f) else None)
+    t_peak_r = (I_r.index(peak_r) if I_r and (peak_r in I_r) else None)
 
     return {
-        "seed_used": run.get("seed_used"),
-        "peak_fake": int(peak_f),
-        "peak_real": int(peak_r),
-        "t_peak_fake": t_peak_f,
-        "t_peak_real": t_peak_r,
-        "reach_fake": round(reach_fake * 100, 2),  # %
-        "reach_real": round(reach_real * 100, 2),  # %
-        "cum_shares_fake": int(sum(shares_f)),
-        "cum_shares_real": int(sum(shares_r)),
+        "peak_f": peak_f,
+        "peak_r": peak_r,
+        "t_peak_f": t_peak_f,
+        "t_peak_r": t_peak_r,
+        "total_shares_f": int(sum(shares_f)),
+        "total_shares_r": int(sum(shares_r)),
+        "reach_fake": reach_fake,  # proportions
+        "reach_real": reach_real,  # proportions
     }
 
 def time_to_equilibrium(series: List[int], window: int = 10, tol: float = 1e-6) -> Optional[int]:
