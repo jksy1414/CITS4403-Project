@@ -1,31 +1,22 @@
-# CITS4403 Project — Fake vs Real News Spread
+# CITS4403 — CA Model of Fake vs Real Information Spread
 
-## Overview
-This project simulates how **fake news** and **real news** spread in a population.  
-We implement two approaches:
-- **Cellular Automata (CA)** → people arranged on a grid.  
-- **Graph model** → people as nodes in a social network (to be implemented by teammate).  
+## Quickstart
+python -m venv .venv && source .venv/bin/activate  # (Windows: .venv\Scripts\activate)
+pip install -r requirements.txt
 
-The aim is to compare how fake vs real information spreads depending on behaviour (sharing, forgetting, correcting) and network structure (grid vs graph).
+## Run a simulation
+python -m src.ca.run
 
----
+Outputs:
+- JSON: data/runs/CA_run_YYYYMMDD-HHMMSS.json
+- Figures (from notebooks): data/figures/*.png
 
-## Setup Instructions
+## Repo layout
+(src/ca engine, utils for IO/metrics/plotting, notebooks per experiment)
 
-### 1. Create and activate a virtual environment
-From the project root:
-```
-python -m venv .venv
-.\.venv\Scripts\activate
-```
-### 2. Install dependencies
-Install all required Python packages:
-Dependencies included:
+## Reproducibility
+- All params embedded in each JSON (including RNG seed).
+- Notebooks load JSON and regenerate figures.
 
-```
-numpy - for grid operations
-matplotlib - for plotting results
-pandas - for analysing results
-```
-
-
+## Tests
+pytest -q
