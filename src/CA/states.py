@@ -14,8 +14,8 @@ class State(IntEnum):
 @dataclass
 class Params:
     # World / timing
-    N: int = 100      # grid N x N (population size for CA)
-    T: int = 200      # number of time steps
+    N: int = 50      # grid N x N (population size for CA)
+    T: int = 60      # number of time steps
     rng_seed: Optional[int] = None  # None => random seed each run
 
     # Behaviour probabilities
@@ -34,3 +34,18 @@ class Params:
     # Natural decay of attention (forgetting)
     delta_decay_f: float = 0.12  # fake forgets faster
     delta_decay_r: float = 0.06  # real forgets slower
+
+    def __post_init__(self):
+        if self.N <= 0 or self.T <= 0:
+            raise ValueError("N and T must be positive.")
+        if self.seeds_f0 < 0 or self.seeds_r0 < 0:
+            raise ValueError("seed counts must be >= 0.")
+        if self.seeds_f0 + self.seeds_r0 > self.N * self.N:
+            raise ValueError("too many seeds for grid size.")
+        for name in [
+            "beta_see","beta_share_f","beta_share_r",
+            "gamma_correction","gamma_switch","delta_decay_f","delta_decay_r"
+        ]:
+            v = getattr(self, name)
+            if not (0.0 <= v <= 1.0):
+                raise ValueError(f"{name} must be in [0,1], got {v}.")
