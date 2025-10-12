@@ -177,8 +177,10 @@ def main():
         "--eta", type=float, default=0.02, help="Misclassification probability η in [0,1] (default 0.02)."
     )
     parser.add_argument(
-        "--hetero-sd", type=float, default=0.20, help="Std dev for per-agent multiplicative noise (hetero)"
+        "--hetero-sd", type=float, default=0.20, help="Std dev for per-agent multiplicative noise (M4 hetero)"
     )
+    parser.add_argument("--spatial-strength", type=float, default=0.35,
+                    help="Spatial strength in [0,1] for M5 (0=no effect, 1=strong)")
     args = parser.parse_args()
 
     micro_flags = {x.strip().lower() for x in args.micro.split(",") if x.strip()}
@@ -203,17 +205,24 @@ def main():
             **base_params,
             rng_seed=seed,
             update_scheme=args.scheme,
+
             # micro toggles
             micro_async=("async" in micro_flags) or (args.scheme == "async"),
             micro_refractory=("refractory" in micro_flags),
             micro_misclass=("misclass" in micro_flags),
+
             # macro toggles
-            macro_hetero=("hetero" in macro_flags),
+            macro_hetero=("hetero" in macro_flags),   # M4
+            macro_spatial=("spatial" in macro_flags), # M5  ← NEW
+
             # micro config
             tau_post=3,
             eta_misclass=float(args.eta),
-            # macro config
+
+            # macro configs
             hetero_sd=float(args.hetero_sd),
+            spatial_strength=float(args.spatial_strength),  # ← NEW
+            spatial_mode="radial",  # keep simple; can expose later
         )
         return p
 

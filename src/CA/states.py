@@ -59,6 +59,8 @@ class Params:
 
     # --- M4 configuration ---
     hetero_sd: float = 0.20  # std dev for multiplicative noise ~ N(1, hetero_sd)
+    spatial_strength: float = 0.35  # 0=no effect, 1=strong spatial modulation
+    spatial_mode: str = "radial"    # "radial" or "x-gradient"
     
     def __post_init__(self):
         if self.N <= 0 or self.T <= 0:
@@ -67,18 +69,18 @@ class Params:
             raise ValueError("seed counts must be >= 0.")
         if self.seeds_f0 + self.seeds_r0 > self.N * self.N:
             raise ValueError("too many seeds for grid size.")
-        for name in [
-            "beta_see","beta_share_f","beta_share_r",
-            "gamma_correction","gamma_switch","delta_decay_f","delta_decay_r"
-        ]:
-            v = getattr(self, name)
-            if not (0.0 <= v <= 1.0):
-                raise ValueError(f"{name} must be in [0,1], got {v}.")
         if self.update_scheme not in ("sync", "async"):
             raise ValueError("update_scheme must be 'sync' or 'async'.")
-        if self.tau_post < 0:
-            raise ValueError("tau_post must be >= 0")
-        if not (0.0 <= self.eta_misclass <= 1.0):
-            raise ValueError("eta_misclass must be in [0,1].")
-        if self.hetero_sd < 0:
-            raise ValueError("hetero_sd must be >= 0")
+
+        for name in [
+            "beta_see","beta_share_f","beta_share_r",
+            "gamma_correction","gamma_switch","delta_decay_f","delta_decay_r",
+            "eta_misclass","spatial_strength","hetero_sd"
+        ]:
+            v = float(getattr(self, name))
+            if name in ("eta_misclass","spatial_strength"):
+                if not (0.0 <= v <= 1.0):
+                    raise ValueError(f"{name} must be in [0,1], got {v}.")
+            else:
+                if not (0.0 <= v <= 1.0):
+                    raise ValueError(f"{name} must be in [0,1], got {v}.")

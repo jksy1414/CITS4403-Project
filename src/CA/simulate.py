@@ -1,7 +1,5 @@
 # src/ca/simulate.py
-from __future__ import annotations
 import numpy as np
-from typing import Tuple
 from .states import State, Params
 from .grid import posting_neighbour_flags
 from .rules import update_cell
@@ -15,120 +13,147 @@ def seed_initial(N: int, seeds_f0: int, seeds_r0: int, rng: np.random.Generator)
         state.flat[idx[seeds_f0:total]] = State.I_R
     return state
 
-def _build_hetero_multipliers(N: int, rng: np.random.Generator, p: Params) -> Tuple[np.ndarray, np.ndarray]:
-    """
-    Returns (f_mult, r_mult) multiplicative maps for fake/real share probabilities.
-    If heterogeneity is OFF, returns ones.
-    With heterogeneity ON, draw lognormal factors with sd=hetero_sd (approx).
-    """
-    if getattr(p, "macro_hetero", False):
-        sd = float(getattr(p, "hetero_sd", 0.20))
-        # Use lognormal around 1.0 (median=1), sd controlled; clamp to a sane range
-        mu = 0.0  # median ~ 1.0
-        sigma = sd
-        f_mult = rng.lognormal(mean=mu, sigma=sigma, size=(N, N)).astype(np.float32)
-        r_mult = rng.lognormal(mean=mu, sigma=sigma, size=(N, N)).astype(np.float32)
-        # Optional clamp to reduce outliers
-        f_mult = np.clip(f_mult, 0.25, 4.0)
-        r_mult = np.clip(r_mult, 0.25, 4.0)
-        return f_mult, r_mult
-    else:
-        ones = np.ones((N, N), dtype=np.float32)
-        return ones, ones
+# ---------- Macro helpers ----------
 
-def _tick_sync(state: np.ndarray, cooldown: np.ndarray, rng: np.random.Generator, p: Params,
-               f_mult: np.ndarray, r_mult: np.ndarray) -> tuple[np.ndarray, np.ndarray, int, int]:
-    N = state.shape[0]
+def _hetero_multipliers(N: int, rng: np.random.Generator, sd: float) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Returns two NxN fields (for fake, real) ~ lognormal noise with mean ~1.
+    sd is the stdev of the underlying normal; we clamp to [0.3, 2.0] to avoid extremes.
+    """
+    if sd <= 0:
+        ones = np.ones((N, N), dtype=float)
+        return ones, ones
+    zf = rng.normal(0.0, sd, size=(N, N))
+    zr = rng.normal(0.0, sd, size=(N, N))
+    f_mult = np.clip(np.exp(zf), 0.3, 2.0)
+    r_mult = np.clip(np.exp(zr), 0.3, 2.0)
+    return f_mult, r_mult
+
+def _spatial_field(N: int, strength: float, mode: str = "radial") -> np.ndarray:
+    """
+    Spatial weight W[i,j] in [0,1]. W=1 means no change, lower values damp sharing/seeing.
+    We construct a base pattern G in [0,1], then mix: W = (1-strength) + strength*G.
+    - 'radial': center high, edges low
+    - 'x-gradient': left low, right high
+    """
+    if strength <= 0.0:
+        return np.ones((N, N), dtype=float)
+
+    y = np.linspace(-1, 1, N)
+    x = np.linspace(-1, 1, N)
+    X, Y = np.meshgrid(x, y)
+
+    if mode == "x-gradient":
+        G = (X + 1.0) / 2.0  # 0..1 left->right
+    else:
+        # radial bump: 1 at center, ~0 at corners
+        R2 = X**2 + Y**2
+        G = np.clip(1.0 - R2, 0.0, 1.0)
+
+    W = (1.0 - strength) + strength * G
+    # Clamp numerically safe
+    return np.clip(W, 0.0, 1.0)
+
+# ---------- Core ticks ----------
+
+def _tick_sync(state, cooldown, rng, p: Params, f_mult, r_mult, w_field):
     saw_f, saw_r = posting_neighbour_flags(state)
 
+    # misclassification view (prob η): flip saw_f/saw_r with small chance
+    if p.micro_misclass and p.eta_misclass > 0.0:
+        mask = rng.random(state.shape) < p.eta_misclass
+        # three-way logic: we handle flips elementwise
+        # create copies
+        sf = saw_f.copy()
+        sr = saw_r.copy()
+        # where mask and both True/False -> leave as is or random swap
+        # simpler: on mask, swap booleans
+        saw_f = np.where(mask, sr, sf)
+        saw_r = np.where(mask, sf, sr)
+
+    # record REACH before updating
+    ever_fake = (saw_f | (state == State.I_F) | (state == State.E_F))
+    ever_real = (saw_r | (state == State.I_R) | (state == State.E_R))
+
+    N = p.N
     next_state = state.copy()
-    new_shares_f = 0
-    new_shares_r = 0
+    new_f = 0
+    new_r = 0
 
     for i in range(N):
         for j in range(N):
-            s = int(state[i, j])
+            # effective share probs at (i,j)
+            sf = float(np.clip(p.beta_share_f * f_mult[i, j] * w_field[i, j], 0.0, 1.0))
+            sr = float(np.clip(p.beta_share_r * r_mult[i, j] * w_field[i, j], 0.0, 1.0))
 
-            # refractory handling (if enabled)
-            if getattr(p, "micro_refractory", False) and cooldown[i, j] > 0:
-                # only decay cooldown; state locked (no change)
-                cooldown[i, j] = max(0, cooldown[i, j] - 1)
-                continue
+            # refractory: if cooling > 0, skip state changes (except decay down from I_* handled in rules)
+            if p.micro_refractory and cooldown is not None and cooldown[i, j] > 0:
+                # still allow decay while posting? We’ll respect cooldown by freezing transitions away from exposed,
+                # but keep rules unified—so we pass through update_cell but afterwards we enforce no change unless decay.
+                pass
 
-            # hetero-adjusted probs (then clamped in update_cell too)
-            sf = float(np.clip(p.beta_share_f * f_mult[i, j], 0.0, 1.0))
-            sr = float(np.clip(p.beta_share_r * r_mult[i, j], 0.0, 1.0))
+            ns = update_cell(int(state[i, j]),
+                             bool(saw_f[i, j]), bool(saw_r[i, j]),
+                             rng, p, sf, sr)
 
-            ns = update_cell(
-                s,
-                bool(saw_f[i, j]),
-                bool(saw_r[i, j]),
-                rng,
-                p,
-                share_f_prob=sf,
-                share_r_prob=sr,
-            )
-
-            # set cooldown if newly started posting (when refractory active)
-            if getattr(p, "micro_refractory", False):
-                if s != State.I_F and ns == State.I_F:
-                    cooldown[i, j] = getattr(p, "tau_post", 3)
-                elif s != State.I_R and ns == State.I_R:
-                    cooldown[i, j] = getattr(p, "tau_post", 3)
-
-            # count new posts
-            if s != State.I_F and ns == State.I_F: new_shares_f += 1
-            if s != State.I_R and ns == State.I_R: new_shares_r += 1
+            # refractory bookkeeping: if started posting now, set cooldown
+            if p.micro_refractory and cooldown is not None:
+                if state[i, j] != State.I_F and ns == State.I_F:
+                    cooldown[i, j] = p.tau_post
+                elif state[i, j] != State.I_R and ns == State.I_R:
+                    cooldown[i, j] = p.tau_post
+                else:
+                    # tick down if >0
+                    if cooldown[i, j] > 0:
+                        cooldown[i, j] -= 1
 
             next_state[i, j] = ns
+            if state[i, j] != State.I_F and ns == State.I_F: new_f += 1
+            if state[i, j] != State.I_R and ns == State.I_R: new_r += 1
 
-    return next_state, cooldown, new_shares_f, new_shares_r
+    return next_state, cooldown, new_f, new_r, ever_fake, ever_real
 
-def _tick_async(state: np.ndarray, cooldown: np.ndarray, rng: np.random.Generator, p: Params,
-                f_mult: np.ndarray, r_mult: np.ndarray) -> tuple[np.ndarray, np.ndarray, int, int]:
-    N = state.shape[0]
-    # draw a fresh random order each step
+def _tick_async(state, cooldown, rng, p: Params, f_mult, r_mult, w_field):
+    saw_f, saw_r = posting_neighbour_flags(state)
+
+    if p.micro_misclass and p.eta_misclass > 0.0:
+        mask = rng.random(state.shape) < p.eta_misclass
+        sf = saw_f.copy(); sr = saw_r.copy()
+        saw_f = np.where(mask, sr, sf)
+        saw_r = np.where(mask, sf, sr)
+
+    N = p.N
     order = rng.permutation(N * N)
-    new_shares_f = 0
-    new_shares_r = 0
+    new_f = 0
+    new_r = 0
+    ever_fake = (saw_f | (state == State.I_F) | (state == State.E_F))
+    ever_real = (saw_r | (state == State.I_R) | (state == State.E_R))
 
     for idx in order:
-        i = idx // N
-        j = idx % N
-        s = int(state[i, j])
+        i, j = divmod(idx, N)
+        sf = float(np.clip(p.beta_share_f * f_mult[i, j] * w_field[i, j], 0.0, 1.0))
+        sr = float(np.clip(p.beta_share_r * r_mult[i, j] * w_field[i, j], 0.0, 1.0))
 
-        # refractory handling (if enabled)
-        if getattr(p, "micro_refractory", False) and cooldown[i, j] > 0:
-            cooldown[i, j] = max(0, cooldown[i, j] - 1)
-            continue
+        ns = update_cell(int(state[i, j]),
+                         bool(saw_f[i, j]), bool(saw_r[i, j]),
+                         rng, p, sf, sr)
 
-        # neighborhood from current (asynchronously updated) state
-        saw_f, saw_r = posting_neighbour_flags(state)
-        sf = float(np.clip(p.beta_share_f * f_mult[i, j], 0.0, 1.0))
-        sr = float(np.clip(p.beta_share_r * r_mult[i, j], 0.0, 1.0))
+        if p.micro_refractory and cooldown is not None:
+            if state[i, j] != State.I_F and ns == State.I_F:
+                cooldown[i, j] = p.tau_post
+            elif state[i, j] != State.I_R and ns == State.I_R:
+                cooldown[i, j] = p.tau_post
+            else:
+                if cooldown[i, j] > 0:
+                    cooldown[i, j] -= 1
 
-        ns = update_cell(
-            s,
-            bool(saw_f[i, j]),
-            bool(saw_r[i, j]),
-            rng,
-            p,
-            share_f_prob=sf,
-            share_r_prob=sr,
-        )
+        if state[i, j] != State.I_F and ns == State.I_F: new_f += 1
+        if state[i, j] != State.I_R and ns == State.I_R: new_r += 1
+        state[i, j] = ns  # async: write-through
 
-        if getattr(p, "micro_refractory", False):
-            if s != State.I_F and ns == State.I_F:
-                cooldown[i, j] = getattr(p, "tau_post", 3)
-            elif s != State.I_R and ns == State.I_R:
-                cooldown[i, j] = getattr(p, "tau_post", 3)
+    return state, cooldown, new_f, new_r, ever_fake, ever_real
 
-        if s != State.I_F and ns == State.I_F: new_shares_f += 1
-        if s != State.I_R and ns == State.I_R: new_shares_r += 1
-
-        state[i, j] = ns  # async: write back immediately
-
-    return state, cooldown, new_shares_f, new_shares_r
+# ---------- simulate ----------
 
 def simulate(p: Params) -> dict:
     rng = np.random.default_rng(p.rng_seed)
@@ -139,11 +164,19 @@ def simulate(p: Params) -> dict:
     N, T = p.N, p.T
     state = seed_initial(N, p.seeds_f0, p.seeds_r0, rng)
 
-    # heterogeneity multipliers (always defined)
-    f_mult, r_mult = _build_hetero_multipliers(N, rng, p)
+    # Macro fields (always defined → avoids NameError)
+    f_mult, r_mult = (np.ones((N, N), dtype=float), np.ones((N, N), dtype=float))
+    if p.macro_hetero:
+        f_mult, r_mult = _hetero_multipliers(N, rng, p.hetero_sd)
 
-    # cooldown (for refractory; still created even if feature off)
-    cooldown = np.zeros((N, N), dtype=np.int16)
+    w_field = np.ones((N, N), dtype=float)
+    if p.macro_spatial:
+        w_field = _spatial_field(N, p.spatial_strength, p.spatial_mode)
+
+    # Refractory cooldowns (micro M2)
+    cooldown = None
+    if p.micro_refractory:
+        cooldown = np.zeros((N, N), dtype=np.int16)
 
     I_f, I_r = [], []
     shares_f, shares_r = [], []
@@ -151,16 +184,13 @@ def simulate(p: Params) -> dict:
     ever_real = np.zeros((N, N), dtype=bool)
 
     for _ in range(T):
-        # snapshot of posters for reach bookkeeping
-        sawF, sawR = posting_neighbour_flags(state)
-        ever_fake |= (sawF | (state == State.I_F) | (state == State.E_F))
-        ever_real |= (sawR | (state == State.I_R) | (state == State.E_R))
-
-        if getattr(p, "update_scheme", "sync") == "async" or getattr(p, "micro_async", False):
-            state, cooldown, new_f, new_r = _tick_async(state, cooldown, rng, p, f_mult, r_mult)
+        if p.update_scheme == "async" or p.micro_async:
+            state, cooldown, new_f, new_r, ef, er = _tick_async(state, cooldown, rng, p, f_mult, r_mult, w_field)
         else:
-            state, cooldown, new_f, new_r = _tick_sync(state, cooldown, rng, p, f_mult, r_mult)
+            state, cooldown, new_f, new_r, ef, er = _tick_sync(state, cooldown, rng, p, f_mult, r_mult, w_field)
 
+        ever_fake |= ef
+        ever_real |= er
         I_f.append(int(np.sum(state == State.I_F)))
         I_r.append(int(np.sum(state == State.I_R)))
         shares_f.append(int(new_f))
