@@ -1,45 +1,23 @@
 # ============================
-# Python
+# Data / results
 # ============================
-__pycache__/
-*.py[cod]
-*.so
-*.egg
-*.egg-info/
-*.pyo
-*.json
-*.pyc
-
-# Virtual environments
-.venv/
-venv/
-env/
-
-# IDE/editor settings
-.vscode/
-.idea/
-*.swp
-
-# ============================
-# Jupyter Notebooks
-# ============================
-.ipynb_checkpoints/
-
-# ============================
-# Data / results (optional)
-# ============================
-# Ignore large raw data, but keep small result CSVs you want to push
-data/*.json
-data/*.npz
-data/*.npy
-data/*.pkl
-data/*.log
-data/*.tmp
+# Ignore everything by default…
 data/**
+
+# …but allow these dirs so child rules can apply
+!data/
+!data/runs/
+!data/runs/ca/
+
+# Keep ALL results under data/runs/ca (any naming pattern)
+!data/runs/ca/**/*.csv
+!data/runs/ca/**/*.json
 !data/**/README.md
 
-# ============================
-# OS / misc
-# ============================
-.DS_Store
-Thumbs.db
+# Still ignore heavy/binary caches anywhere
+data/**/*.npz
+data/**/*.npy
+data/**/*.pkl
+data/**/*.log
+data/**/*.tmp
+data/**/*.zip
