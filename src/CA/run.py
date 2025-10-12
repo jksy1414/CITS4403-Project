@@ -1,4 +1,3 @@
-# src/ca/run.py
 from __future__ import annotations
 import argparse
 from pathlib import Path
@@ -10,12 +9,10 @@ from .simulate import simulate
 from utils.io import save_json
 from utils.io_paths import runs_dir, timestamped_run_path
 
-# External summariser is optional; we won't rely on it
 try:
     from utils.metrics import summarise as _summarise_external
 except Exception:
     _summarise_external = None
-
 
 # --------------------
 # Label helpers
@@ -26,19 +23,16 @@ def _sanitize_label(text: str) -> str:
     return t or "run"
 
 def _features_suffix(p: "Params") -> str:
-    """Create a label suffix from toggles/scheme."""
     tags = []
     if p.update_scheme == "async":
         tags.append("async")
     if getattr(p, "micro_refractory", False): tags.append("refractory")
     if getattr(p, "micro_misclass", False):   tags.append("misclass")
-    if getattr(p, "micro_broadcast", False):  tags.append("broadcast")
     if getattr(p, "macro_hetero", False):     tags.append("hetero")
     if getattr(p, "macro_spatial", False):    tags.append("spatial")
     return "_".join(tags) if tags else "baseline"
 
 def _auto_label(base_label: str | None, p: "Params") -> str:
-    """If user didn’t pass --label, compose one from toggles/scheme."""
     suffix = _features_suffix(p)
     if base_label:
         return f"{_sanitize_label(base_label)}_{suffix}"
@@ -51,15 +45,10 @@ def _make_batch_dir(model_name: str = "ca", label: str | None = None) -> Path:
     d.mkdir(parents=True, exist_ok=True)
     return d
 
-
 # --------------------
 # Summary helpers
 # --------------------
 def _derive_summary(run: dict) -> dict:
-    """
-    Built-in summary using proportions (0–1) for reach.
-    This function never returns percentages for reach.
-    """
     I_f = run.get("I_f", []) or []
     I_r = run.get("I_r", []) or []
     shares_f = run.get("shares_f", []) or []
@@ -81,12 +70,11 @@ def _derive_summary(run: dict) -> dict:
         "t_peak_r": t_peak_r,
         "total_shares_f": int(sum(shares_f)),
         "total_shares_r": int(sum(shares_r)),
-        "reach_fake": reach_fake,  # proportions (0–1)
-        "reach_real": reach_real,  # proportions (0–1)
+        "reach_fake": reach_fake,
+        "reach_real": reach_real,
     }
 
 def _normalize_reach_in_place(d: dict) -> None:
-    """Ensure reach_* are proportions (0–1) even if external summariser returns %."""
     for k in ("reach_fake", "reach_real"):
         if k in d and d[k] is not None:
             try:
@@ -97,7 +85,6 @@ def _normalize_reach_in_place(d: dict) -> None:
 
 def _print_single_summary(out: dict, path: Path) -> None:
     sm = _derive_summary(out)
-    # Merge external summariser and re-normalize
     if _summarise_external is not None:
         try:
             ext = _summarise_external(out) or {}
@@ -114,12 +101,8 @@ def _print_single_summary(out: dict, path: Path) -> None:
     print(f"Total shares — Fake: {sm['total_shares_f']}, Real: {sm['total_shares_r']}")
     print(f"Time to peak — Fake: {sm['t_peak_f']}, Real: {sm['t_peak_r']}")
 
-
 def _params_to_columns(p: "Params") -> dict:
-    """Flatten Params into CSV/row-friendly columns with 'param_' prefix."""
     d = dict(p.__dict__)
-    # Don't duplicate rng_seed per row (we add a per-run 'seed' separately)
-    # but keep it here for completeness; users sometimes want to see both.
     out = {}
     for k, v in d.items():
         out[f"param_{k}"] = v
@@ -137,7 +120,6 @@ def _row_metadata(p: "Params", label: str, features: str, seed_used: int, run_in
     meta.update(_params_to_columns(p))
     return meta
 
-
 # --------------------
 # Main
 # --------------------
@@ -149,16 +131,16 @@ def main():
     parser.add_argument("--scheme", type=str, default="sync", choices=["sync","async"],
                         help="Update scheme (sync or async).")
     parser.add_argument("--micro", type=str, default="",
-                        help="Comma-separated micro toggles: async,refractory,misclass,broadcast")
+                        help="Comma-separated micro toggles: async,refractory,misclass")
     parser.add_argument("--macro", type=str, default="",
                         help="Comma-separated macro toggles: hetero,spatial")
+    parser.add_argument("--eta", type=float, default=0.02,
+                        help="Misclassification probability η in [0,1] (default 0.02).")
     args = parser.parse_args()
 
-    # parse toggles
     micro_flags = {x.strip().lower() for x in args.micro.split(",") if x.strip()}
     macro_flags = {x.strip().lower() for x in args.macro.split(",") if x.strip()}
 
-    # base parameters (unchanged)
     base_params = dict(
         N=50, T=60,
         seeds_f0=6, seeds_r0=5,
@@ -167,23 +149,21 @@ def main():
         delta_decay_f=0.12, delta_decay_r=0.06,
     )
 
-    # builder to create Params for a given seed
     def _build_params(seed: int | None) -> "Params":
         p = Params(
             **base_params,
             rng_seed=seed,
             update_scheme=args.scheme,
-            # toggles (no behavior attached yet except async via update_scheme)
             micro_async=("async" in micro_flags) or (args.scheme == "async"),
             micro_refractory=("refractory" in micro_flags),
             micro_misclass=("misclass" in micro_flags),
-            micro_broadcast=("broadcast" in micro_flags),
             macro_hetero=("hetero" in macro_flags),
             macro_spatial=("spatial" in macro_flags),
+            tau_post=3,                 # you can expose this later if you want
+            eta_misclass=float(args.eta),
         )
         return p
 
-    # proto params for naming (consistent folder label)
     proto_p = _build_params(args.seed)
     features = _features_suffix(proto_p)
     effective_label = _auto_label(args.label, proto_p)
@@ -196,7 +176,6 @@ def main():
         save_json(out, path)
         _print_single_summary(out, path)
 
-        # Also write a compact single-run summary with config for auditing
         sm = _derive_summary(out)
         if _summarise_external is not None:
             try:
@@ -206,7 +185,6 @@ def main():
                 _normalize_reach_in_place(sm)
 
         sm.update(_row_metadata(p, effective_label, features, out.get("seed_used", args.seed), 0, path))
-        # Save next to the run file
         save_json({"aggregate": None, "rows": [sm]}, Path(str(path).replace(".json", "_summary.json")))
         return
 
@@ -229,7 +207,6 @@ def main():
         run_path = batch_dir / f"CA_run_{i:02d}.json"
         save_json(out, run_path)
 
-        # robust per-run summary
         sm = _derive_summary(out)
         if _summarise_external is not None:
             try:
@@ -251,8 +228,6 @@ def main():
     try:
         import pandas as pd
         df = pd.DataFrame(rows)
-
-        # Ensure reach_* are proportions
         for col in ("reach_fake", "reach_real"):
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
@@ -266,7 +241,6 @@ def main():
             "label": effective_label,
             "features": features,
             "base_seed": base_seed,
-            # Means/stds over proportions
             "peak_f_mean": float(df["peak_f"].mean()),
             "peak_r_mean": float(df["peak_r"].mean()),
             "reach_fake_mean": float(df["reach_fake"].mean()),
@@ -277,12 +251,10 @@ def main():
             "peak_r_std": float(df["peak_r"].std(ddof=0)),
             "reach_fake_std": float(df["reach_fake"].std(ddof=0)),
             "reach_real_std": float(df["reach_real"].std(ddof=0)),
-            # NEW: timing aggregates
             "t_peak_f_mean": float(pd.to_numeric(df["t_peak_f"], errors="coerce").mean()),
             "t_peak_r_mean": float(pd.to_numeric(df["t_peak_r"], errors="coerce").mean()),
             "t_peak_f_std": float(pd.to_numeric(df["t_peak_f"], errors="coerce").std(ddof=0)),
             "t_peak_r_std": float(pd.to_numeric(df["t_peak_r"], errors="coerce").std(ddof=0)),
-            # Helpful snapshot of the config template that produced rows
             "params_template": _params_to_columns(proto_p),
         }
         save_json({"aggregate": agg, "rows": rows}, batch_dir / "summary.json")
@@ -296,7 +268,6 @@ def main():
               f"t_peak_r≈{agg['t_peak_r_mean']:.1f}±{agg['t_peak_r_std']:.1f}  [{features}]")
     except Exception as e:
         print(f"Note: could not write summary.csv / summary.json ({e}). Per-run JSONs are saved in {batch_dir}.")
-
-
+        
 if __name__ == "__main__":
     main()

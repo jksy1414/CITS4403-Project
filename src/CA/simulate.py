@@ -26,6 +26,23 @@ def _decay_cooldown_in_place(cooldown: np.ndarray, mask_exempt: np.ndarray | Non
         dec_mask = (cooldown > 0) & (~mask_exempt)
         cooldown[dec_mask] -= 1
 
+# ---------- misclassification helper (M3) ----------
+
+def _apply_misclass(saw_f: bool, saw_r: bool, rng: np.random.Generator, p: Params) -> tuple[bool, bool]:
+    """
+    With probability eta_misclass, flip the perception fake<->real if exactly one of them is seen.
+    If both or none are seen, leave unchanged (simple symmetric model).
+    """
+    if not getattr(p, "micro_misclass", False) or p.eta_misclass <= 0.0:
+        return saw_f, saw_r
+
+    if rng.random() < p.eta_misclass:
+        if saw_f and not saw_r:
+            return False, True
+        if saw_r and not saw_f:
+            return True, False
+    return saw_f, saw_r
+
 # ---------- sync tick ----------
 
 def _tick_sync(state: np.ndarray, cooldown: np.ndarray, rng: np.random.Generator, p: Params):

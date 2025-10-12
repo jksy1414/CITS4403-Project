@@ -46,7 +46,6 @@ class Params:
     micro_async: bool = False          # mirrors update_scheme == "async"
     micro_refractory: bool = False     # M2 (cooldown τ) - not implemented yet
     micro_misclass: bool = False       # M3 (η) - not implemented yet
-    micro_broadcast: bool = False      # M4 (π) - not implemented yet
 
     # Macro features (placeholders)
     macro_hetero: bool = False         # M5 - not implemented yet
@@ -54,6 +53,9 @@ class Params:
 
     # --- refractory configuration ---
     tau_post: int = 3  # NEW: number of ticks a poster is 'locked'
+
+    # --- misclassification configuration ---
+    eta_misclass: float = 0.02  # probability to misread fake<->rea
     
     def __post_init__(self):
         if self.N <= 0 or self.T <= 0:
@@ -71,3 +73,7 @@ class Params:
                 raise ValueError(f"{name} must be in [0,1], got {v}.")
         if self.update_scheme not in ("sync", "async"):
             raise ValueError("update_scheme must be 'sync' or 'async'.")
+        if self.tau_post < 0:
+            raise ValueError("tau_post must be >= 0")
+        if not (0.0 <= self.eta_misclass <= 1.0):
+            raise ValueError("eta_misclass must be in [0,1].")
