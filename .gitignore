@@ -9,15 +9,12 @@ data/**
 !data/runs/
 !data/runs/ca/
 
-# Always keep summaries (needed for marking)
-!data/**/summary.csv
-!data/**/summary.json
+# Keep ALL results under data/runs/ca (any naming pattern)
+!data/runs/ca/**/*.csv
+!data/runs/ca/**/*.json
 !data/**/README.md
 
-# Keep all reasonable sample of per-run JSONs (00–29)
-!data/**/CA_run_*.json
-
-# Still ignore heavy/binary caches
+# Still ignore heavy/binary caches anywhere
 data/**/*.npz
 data/**/*.npy
 data/**/*.pkl
