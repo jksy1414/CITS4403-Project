@@ -1,8 +1,8 @@
 # src/ca/run.py
 from .states import Params
 from .simulate import simulate
-from src.utils.io import save_json
-from src.utils.io_paths import timestamped_run_path
+from utils.io import save_json
+from utils.io_paths import timestamped_run_path
 
 def main():
     p = Params(

@@ -1,7 +1,7 @@
 from pathlib import Path
 from datetime import datetime
 
-BASE_DIR = Path(__file__).resolve().parents[2]
+BASE_DIR = Path(__file__).resolve().parents[1]
 
 def runs_dir(model_name="ca") -> Path:
     d = BASE_DIR / "data" / "runs" / model_name
