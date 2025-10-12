@@ -56,6 +56,9 @@ class Params:
 
     # --- misclassification configuration ---
     eta_misclass: float = 0.02  # probability to misread fake<->rea
+
+    # --- M4 configuration ---
+    hetero_sd: float = 0.20  # std dev for multiplicative noise ~ N(1, hetero_sd)
     
     def __post_init__(self):
         if self.N <= 0 or self.T <= 0:
@@ -77,3 +80,5 @@ class Params:
             raise ValueError("tau_post must be >= 0")
         if not (0.0 <= self.eta_misclass <= 1.0):
             raise ValueError("eta_misclass must be in [0,1].")
+        if self.hetero_sd < 0:
+            raise ValueError("hetero_sd must be >= 0")

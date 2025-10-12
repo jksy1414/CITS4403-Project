@@ -136,6 +136,7 @@ def main():
                         help="Comma-separated macro toggles: hetero,spatial")
     parser.add_argument("--eta", type=float, default=0.02,
                         help="Misclassification probability η in [0,1] (default 0.02).")
+    parser.add_argument("--hetero-sd", type=float, default=0.20, help="Std dev for per-agent multiplicative noise (M4)")
     args = parser.parse_args()
 
     micro_flags = {x.strip().lower() for x in args.micro.split(",") if x.strip()}
@@ -154,13 +155,21 @@ def main():
             **base_params,
             rng_seed=seed,
             update_scheme=args.scheme,
+
+            # micro toggles
             micro_async=("async" in micro_flags) or (args.scheme == "async"),
             micro_refractory=("refractory" in micro_flags),
             micro_misclass=("misclass" in micro_flags),
-            macro_hetero=("hetero" in macro_flags),
-            macro_spatial=("spatial" in macro_flags),
-            tau_post=3,                 # you can expose this later if you want
+
+            # macro toggles
+            macro_hetero=("hetero" in macro_flags),     # M4 (ON/OFF)
+            
+            # micro config
+            tau_post=3,
             eta_misclass=float(args.eta),
+
+            # macro configs (safe to pass always)
+            hetero_sd=float(args.hetero_sd),
         )
         return p
 
