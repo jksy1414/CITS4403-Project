@@ -1,23 +1,60 @@
 # ============================
-# Data / results
+# Python cache and environments
 # ============================
-# Ignore everything by default…
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+*.pyo
+*.so
+.venv/
+venv/
+env/
+
+# ============================
+# IDE / Editor settings
+# ============================
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# ============================
+# Jupyter Notebooks
+# ============================
+.ipynb_checkpoints/
+
+# ============================
+# Data / Results
+# ============================
+# Ignore everything in data by default
 data/**
 
-# …but allow these dirs so child rules can apply
+# Keep these folders so we can allow specific file types
 !data/
 !data/runs/
-!data/runs/ca/
+!data/runs/**/
+!data/figures/
 
-# Keep ALL results under data/runs/ca (any naming pattern)
-!data/runs/ca/**/*.csv
-!data/runs/ca/**/*.json
-!data/**/README.md
+# ✅ Keep all simulation results (.json and .csv) under data/runs/
+!data/runs/**/*.json
+!data/runs/**/*.csv
+!data/runs/**/README.md
 
-# Still ignore heavy/binary caches anywhere
+# Still ignore heavy or binary artifacts
 data/**/*.npz
 data/**/*.npy
 data/**/*.pkl
 data/**/*.log
 data/**/*.tmp
 data/**/*.zip
+data/**/*.bak
+data/**/*.bin
+
+# ============================
+# Miscellaneous
+# ============================
+*.tmp
+*.log
+*.bak

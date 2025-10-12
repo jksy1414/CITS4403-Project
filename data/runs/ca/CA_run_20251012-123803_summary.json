@@ -1,0 +1,41 @@
+{
+  "aggregate": null,
+  "rows": [
+    {
+      "peak_f": 910,
+      "peak_r": 2217,
+      "t_peak_f": 16,
+      "t_peak_r": 53,
+      "total_shares_f": 2089,
+      "total_shares_r": 6390,
+      "reach_fake": 0.5948,
+      "reach_real": 0.9996,
+      "label": "async_refractory",
+      "features": "async_refractory",
+      "update_scheme": "async",
+      "run_index": 0,
+      "seed": 3878048422,
+      "json_path": "C:\\Users\\John Koh\\Desktop\\Australia\\University\\2025 Sem 2\\CITS 4403\\Project\\data\\runs\\ca\\CA_run_20251012-123803.json",
+      "param_N": 50,
+      "param_T": 60,
+      "param_beta_see": 0.35,
+      "param_beta_share_f": 0.5,
+      "param_beta_share_r": 0.4,
+      "param_seeds_f0": 6,
+      "param_seeds_r0": 5,
+      "param_gamma_correction": 0.7,
+      "param_gamma_switch": 0.3,
+      "param_delta_decay_f": 0.12,
+      "param_delta_decay_r": 0.06,
+      "param_rng_seed": null,
+      "param_update_scheme": "async",
+      "param_micro_async": true,
+      "param_micro_refractory": true,
+      "param_micro_misclass": false,
+      "param_macro_hetero": false,
+      "param_macro_spatial": false,
+      "param_tau_post": 3,
+      "param_eta_misclass": 0.02
+    }
+  ]
+}
