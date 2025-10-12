@@ -6,6 +6,7 @@ import re
 
 from .states import Params
 from .simulate import simulate
+
 from utils.io import save_json
 from utils.io_paths import runs_dir, timestamped_run_path
 
@@ -172,7 +173,7 @@ def main():
         "--scheme", type=str, default="sync", choices=["sync", "async"], help="Update scheme (sync or async)."
     )
     parser.add_argument("--micro", type=str, default="", help="Comma-separated micro toggles: async,refractory,misclass")
-    parser.add_argument("--macro", type=str, default="", help="Comma-separated macro toggles: hetero")
+    parser.add_argument("--macro", type=str, default="", help="Comma-separated macro toggles: hetero,spatial")
     parser.add_argument(
         "--eta", type=float, default=0.02, help="Misclassification probability η in [0,1] (default 0.02)."
     )
