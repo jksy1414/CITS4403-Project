@@ -37,7 +37,7 @@ class Params:
     #randomness
     rng_seed: Optional[int] = None  # None => random seed each run
 
-     # --- Update scheme (M1 already implemented) ---
+    # --- Update scheme (M1 already implemented) ---
     # "sync" (default) or "async"
     update_scheme: str = "sync"
 
