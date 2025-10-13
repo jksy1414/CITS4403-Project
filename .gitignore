@@ -28,29 +28,23 @@ Thumbs.db
 # ============================
 # Data / Results
 # ============================
+
 # Ignore everything in data by default
 data/**
 
-# Keep these folders so we can allow specific file types
-!data/
+# --- Allow runs (JSON, CSV)
 !data/runs/
-!data/runs/**/
-!data/figures/
-
-# ✅ Keep all simulation results (.json and .csv) under data/runs/
 !data/runs/**/*.json
 !data/runs/**/*.csv
 !data/runs/**/README.md
 
-# Still ignore heavy or binary artifacts
-data/**/*.npz
-data/**/*.npy
-data/**/*.pkl
-data/**/*.log
-data/**/*.tmp
-data/**/*.zip
-data/**/*.bak
-data/**/*.bin
+# --- Allow figures and metrics
+!data/figures/
+!data/figures/**/*.png
+!data/figures/**/*.jpg
+!data/figures/**/*.jpeg
+!data/figures/**/*.xlsx
+!data/figures/**/*.csv
 
 # ============================
 # Miscellaneous
