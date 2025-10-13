@@ -29,22 +29,26 @@ Thumbs.db
 # Data / Results
 # ============================
 
-# Ignore everything in data by default
-data/**
+# --- Ignore all raw or temporary binary data formats
+data/**/*.npy
+data/**/*.npz
+data/**/*.pkl
+data/**/*.log
+data/**/*.tmp
+data/**/*.zip
+data/**/*.bin
+data/**/*.bak
 
-# --- Allow runs (JSON, CSV)
-!data/runs/
-!data/runs/**/*.json
-!data/runs/**/*.csv
-!data/runs/**/README.md
-
-# --- Allow figures and metrics
-!data/figures/
-!data/figures/**/*.png
-!data/figures/**/*.jpg
-!data/figures/**/*.jpeg
-!data/figures/**/*.xlsx
-!data/figures/**/*.csv
+# ✅ Keep everything else under /data (plots, metrics, JSON, CSV, etc.)
+!data/
+!data/**/
+!data/**/*.json
+!data/**/*.csv
+!data/**/*.xlsx
+!data/**/*.png
+!data/**/*.jpg
+!data/**/*.jpeg
+!data/**/README.md
 
 # ============================
 # Miscellaneous
