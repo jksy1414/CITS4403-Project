@@ -1,6 +1,6 @@
-# src/ca/simulate.py
 from __future__ import annotations
 import numpy as np
+from dataclasses import replace  # <-- add this
 from .states import State, Params
 from .grid import posting_neighbour_flags, posting_neighbour_flags_local
 from .rules import update_cell
@@ -76,8 +76,11 @@ def _apply_misclass_mask(rng: np.random.Generator, saw_f: np.ndarray, saw_r: np.
 def _tick_sync(state: np.ndarray,
                cooldown: np.ndarray | None,
                rng: np.random.Generator,
-               p: Params) -> tuple[np.ndarray, np.ndarray | None, int, int, np.ndarray, np.ndarray]:
-    """Synchronous update: compute neighbour flags once, then update all cells from the snapshot."""
+               p: Params,
+               beta_see_eff: np.ndarray,
+               beta_share_f_eff: np.ndarray,
+               beta_share_r_eff: np.ndarray) -> tuple[np.ndarray, np.ndarray | None, int, int, np.ndarray, np.ndarray]:
+    """Synchronous update with macro-scaled effective probabilities."""
     saw_f, saw_r = posting_neighbour_flags(state)
 
     if p.micro_misclass and p.eta_misclass > 0.0:
@@ -94,11 +97,19 @@ def _tick_sync(state: np.ndarray,
 
     for i in range(N):
         for j in range(N):
+            # local macro-scaled probabilities
+            bsee = float(beta_see_eff[i, j])
+            bsf  = float(beta_share_f_eff[i, j])
+            bsr  = float(beta_share_r_eff[i, j])
+
+            # clone Params with local betas (only these 3 fields differ)
+            p_loc = replace(p, beta_see=bsee, beta_share_f=bsf, beta_share_r=bsr)
+
             cd_in = int(cooldown[i, j]) if (p.micro_refractory and cooldown is not None) else 0
             ns, cd_out, sf, sr = update_cell(
                 int(state[i, j]),
                 bool(saw_f[i, j]), bool(saw_r[i, j]),
-                p, rng,
+                p_loc, rng,
                 cooldown=cd_in,
             )
             next_state[i, j] = ns
@@ -113,15 +124,17 @@ def _tick_sync(state: np.ndarray,
 def _tick_async(state: np.ndarray,
                 cooldown: np.ndarray | None,
                 rng: np.random.Generator,
-                p: Params) -> tuple[np.ndarray, np.ndarray | None, int, int, np.ndarray, np.ndarray]:
-    """Asynchronous update: random visiting order; use local neighbour flags on the current, in-place state."""
+                p: Params,
+                beta_see_eff: np.ndarray,
+                beta_share_f_eff: np.ndarray,
+                beta_share_r_eff: np.ndarray) -> tuple[np.ndarray, np.ndarray | None, int, int, np.ndarray, np.ndarray]:
+    """Asynchronous update with macro-scaled effective probabilities."""
     N = p.N
     order = rng.permutation(N * N)
     new_f = 0
     new_r = 0
 
     # We still accumulate reach from a snapshot at the beginning of the tick
-    # (to remain comparable with sync). This is a design choice; OK for now.
     saw_f0, saw_r0 = posting_neighbour_flags(state)
     if p.micro_misclass and p.eta_misclass > 0.0:
         saw_f0, saw_r0 = _apply_misclass_mask(rng, saw_f0, saw_r0, p.eta_misclass)
@@ -138,11 +151,19 @@ def _tick_async(state: np.ndarray,
             if rng.random() < p.eta_misclass:
                 sf_loc, sr_loc = sr_loc, sf_loc
 
+        # local macro-scaled probabilities
+        bsee = float(beta_see_eff[i, j])
+        bsf  = float(beta_share_f_eff[i, j])
+        bsr  = float(beta_share_r_eff[i, j])
+
+        # clone Params with local betas (only these 3 fields differ)
+        p_loc = replace(p, beta_see=bsee, beta_share_f=bsf, beta_share_r=bsr)
+
         cd_in = int(cooldown[i, j]) if (p.micro_refractory and cooldown is not None) else 0
         ns, cd_out, sf, sr = update_cell(
             int(state[i, j]),
             bool(sf_loc), bool(sr_loc),
-            p, rng,
+            p_loc, rng,
             cooldown=cd_in,
         )
         state[i, j] = ns
@@ -152,7 +173,6 @@ def _tick_async(state: np.ndarray,
         new_r += int(sr)
 
     return state, cooldown, new_f, new_r, ever_fake, ever_real
-
 
 # ---------- simulate ----------
 
@@ -171,6 +191,34 @@ def simulate(p: Params) -> dict:
     if p.micro_refractory:
         cooldown = np.zeros((N, N), dtype=np.int16)
 
+    # --- Macro fields (heterogeneity / spatial) ---
+    # Heterogeneity multiplier per agent
+    if p.macro_hetero and getattr(p, "hetero_sd", 0.0) > 0.0:
+        H = rng.lognormal(mean=0.0, sigma=float(p.hetero_sd), size=(N, N)).astype(np.float32)
+        H = np.clip(H, 0.25, 4.0)  # optional safety
+    else:
+        H = np.ones((N, N), dtype=np.float32)
+
+    # Spatial visibility weight per location
+    if p.macro_spatial and float(getattr(p, "spatial_strength", 0.0)) > 0.0:
+        yy, xx = np.mgrid[0:N, 0:N]
+        cy, cx = (N - 1) / 2.0, (N - 1) / 2.0
+        # normalised radial distance in [0,1]
+        r = np.sqrt((yy - cy)**2 + (xx - cx)**2) / (np.sqrt(2) * ((N - 1) / 2.0))
+        W = np.exp(-float(p.spatial_strength) * r).astype(np.float32)
+        W = np.clip(W, 0.25, 1.0)  # avoid invisibility
+    else:
+        W = np.ones((N, N), dtype=np.float32)
+
+    # Combined multiplier for sharing; 'see' uses W only
+    M = (H * W).astype(np.float32)
+    M = np.clip(M, 0.1, 4.0)
+
+    # Precompute effective probabilities for this run
+    beta_see_eff     = np.clip(float(p.beta_see)     * W, 0.0, 1.0).astype(np.float32)
+    beta_share_f_eff = np.clip(float(p.beta_share_f) * M, 0.0, 1.0).astype(np.float32)
+    beta_share_r_eff = np.clip(float(p.beta_share_r) * M, 0.0, 1.0).astype(np.float32)
+
     # Time series
     I_f, I_r = [], []
     shares_f, shares_r = [], []
@@ -179,9 +227,15 @@ def simulate(p: Params) -> dict:
 
     for _ in range(T):
         if p.update_scheme == "async" or p.micro_async:
-            state, cooldown, new_f, new_r, ef, er = _tick_async(state, cooldown, rng, p)
+            state, cooldown, new_f, new_r, ef, er = _tick_async(
+                state, cooldown, rng, p,
+                beta_see_eff, beta_share_f_eff, beta_share_r_eff
+            )
         else:
-            state, cooldown, new_f, new_r, ef, er = _tick_sync(state, cooldown, rng, p)
+            state, cooldown, new_f, new_r, ef, er = _tick_sync(
+                state, cooldown, rng, p,
+                beta_see_eff, beta_share_f_eff, beta_share_r_eff
+            )
 
         ever_fake |= ef
         ever_real |= er
