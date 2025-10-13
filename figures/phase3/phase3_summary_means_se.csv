@@ -1,3 +1,0 @@
-condition,reach_fake_mean,reach_fake_se,reach_real_mean,reach_real_se,peak_fake_mean,peak_fake_se,peak_real_mean,peak_real_se
-async_refractory_misclass_hetero_spatial,0.87676,0.0055768619736984906,1.0,0.0,610.3,22.865867460843074,2306.05,4.181082081043262
-spatial,0.62763,0.012487247956954387,1.0,0.0,511.675,20.831847767547085,2104.45,4.553943064630632
