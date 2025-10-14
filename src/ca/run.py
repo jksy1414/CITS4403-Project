@@ -7,10 +7,9 @@ from pathlib import Path
 from .states import Params
 from .simulate import simulate
 
-# Updated util imports (reflecting your new filenames)
+# ---- util imports ----
 from utils.json_utils import save_json
 from utils.path_utils import runs_dir, timestamped_run_path
-
 try:
     from utils.metrics_tools import summarise as summarise_external
 except Exception:
@@ -18,17 +17,19 @@ except Exception:
 
 
 # ---------------------------------------------------------------------
-# Label and feature utilities
+# Helper utilities for labels and features
 # ---------------------------------------------------------------------
 
 def clean_label(text: str) -> str:
-    """Standardize a string for filenames or directories."""
+    """Standardize labels for filenames and directories."""
+    if not text:
+        return "run"
     label = text.strip().lower().replace(" ", "_")
-    return re.sub(r"[^a-z0-9_-]+", "", label) or "run"
+    return re.sub(r"[^a-z0-9_-]+", "", label)
 
 
 def describe_features(params: Params | dict) -> str:
-    """Generate a readable tag summarizing which features are enabled."""
+    """Auto-generate tags describing which toggles are active."""
     src = vars(params) if isinstance(params, Params) else params
     tags = []
     if src.get("update_scheme") == "async":
@@ -44,14 +45,13 @@ def describe_features(params: Params | dict) -> str:
     return "_".join(tags) if tags else "baseline"
 
 
-def auto_label(base: str | None, params: Params) -> str:
-    """Append the feature suffix to a base label."""
-    suffix = describe_features(params)
-    return f"{clean_label(base)}_{suffix}" if base else suffix
+def effective_label(cli_label: str | None, params: Params) -> str:
+    """Prefer CLI label if given; fallback to auto feature tags."""
+    return clean_label(cli_label) if cli_label else describe_features(params)
 
 
 def create_batch_dir(model_name: str = "ca", label: str | None = None) -> Path:
-    """Create a timestamped directory to store batch runs."""
+    """Create a timestamped directory for storing batch results."""
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     base = runs_dir(model_name)
     name = f"{clean_label(label)}_{timestamp}" if label else f"batch_{timestamp}"
@@ -61,21 +61,17 @@ def create_batch_dir(model_name: str = "ca", label: str | None = None) -> Path:
 
 
 # ---------------------------------------------------------------------
-# Result summarisation
+# Summarisation utilities
 # ---------------------------------------------------------------------
 
 def summarize_run(result: dict) -> dict:
-    """Compute core statistics (peaks, reach, totals) from simulation output."""
+    """Compute summary metrics from simulation result."""
     I_f, I_r = result.get("I_f", []), result.get("I_r", [])
     shares_f, shares_r = result.get("shares_f", []), result.get("shares_r", [])
     reach_f, reach_r = float(result.get("reach_fake", 0.0)), float(result.get("reach_real", 0.0))
-
-    # Normalize reach (percentage to proportion)
-    if reach_f > 1.0: reach_f /= 100.0
-    if reach_r > 1.0: reach_r /= 100.0
-
-    peak_f = max(I_f) if I_f else 0
-    peak_r = max(I_r) if I_r else 0
+    reach_f = reach_f / 100.0 if reach_f > 1.0 else reach_f
+    reach_r = reach_r / 100.0 if reach_r > 1.0 else reach_r
+    peak_f, peak_r = max(I_f) if I_f else 0, max(I_r) if I_r else 0
     t_peak_f = I_f.index(peak_f) if peak_f in I_f else None
     t_peak_r = I_r.index(peak_r) if peak_r in I_r else None
 
@@ -88,8 +84,25 @@ def summarize_run(result: dict) -> dict:
     }
 
 
+def flatten_params(p: Params) -> dict:
+    return {f"param_{k}": v for k, v in vars(p).items()}
+
+
+def metadata_row(p: Params, label: str, features: str, seed: int, idx: int, path: Path) -> dict:
+    meta = {
+        "label": label,
+        "features": features,
+        "update_scheme": p.update_scheme,
+        "run_index": idx,
+        "seed": seed,
+        "json_path": str(path),
+    }
+    meta.update(flatten_params(p))
+    return meta
+
+
 def print_summary(result: dict, path: Path) -> None:
-    """Display concise metrics after each run."""
+    """Print a readable run summary to console."""
     summary = summarize_run(result)
     if summarise_external:
         try:
@@ -110,35 +123,17 @@ def print_summary(result: dict, path: Path) -> None:
 
 
 # ---------------------------------------------------------------------
-# Parameter flattening and metadata
-# ---------------------------------------------------------------------
-
-def flatten_params(p: Params) -> dict:
-    """Convert Params dataclass to flat dictionary with 'param_' prefixes."""
-    return {f"param_{k}": v for k, v in vars(p).items()}
-
-
-def metadata_row(p: Params, label: str, features: str, seed: int, idx: int, path: Path) -> dict:
-    meta = {
-        "label": label, "features": features, "update_scheme": p.update_scheme,
-        "run_index": idx, "seed": seed, "json_path": str(path)
-    }
-    meta.update(flatten_params(p))
-    return meta
-
-
-# ---------------------------------------------------------------------
 # Main execution
 # ---------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Run CA simulation (single or batch mode).")
+    parser = argparse.ArgumentParser(description="Run CA simulation (single or batch).")
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--label", type=str, default=None)
     parser.add_argument("--scheme", type=str, default="sync", choices=["sync", "async"])
-    parser.add_argument("--micro", type=str, default="", help="Comma-separated micro toggles: async,refractory,misclass")
-    parser.add_argument("--macro", type=str, default="", help="Comma-separated macro toggles: hetero,spatial")
+    parser.add_argument("--micro", type=str, default="")
+    parser.add_argument("--macro", type=str, default="")
     parser.add_argument("--eta", type=float, default=0.02)
     parser.add_argument("--hetero-sd", type=float, default=0.20)
     parser.add_argument("--spatial-strength", type=float, default=0.35)
@@ -172,14 +167,14 @@ def main():
 
     proto = build_params(args.seed)
     features = describe_features(proto)
-    label = auto_label(args.label, proto)
+    label = effective_label(args.label, proto)
 
-    # --- Single run ---
+    # --- single run ---
     if args.runs <= 1:
         p = build_params(args.seed)
         result = simulate(p)
-        feature_tag = describe_features(result.get("params", {}))
-        path = timestamped_run_path(model="ca", prefix=f"CA_{feature_tag}")
+        result["params"]["label"] = label  # embed label for reference
+        path = timestamped_run_path(model="ca", prefix=f"CA_{label}")
         save_json(result, path)
         print_summary(result, path)
 
@@ -196,7 +191,7 @@ def main():
         save_json({"aggregate": None, "rows": [summary]}, path.with_name(path.stem + "_summary.json"))
         return
 
-    # --- Batch run ---
+    # --- batch run ---
     import numpy as np
     batch_dir = create_batch_dir("ca", label)
     print(f"Batch output → {batch_dir}")
@@ -208,6 +203,7 @@ def main():
         seed = base_seed + i
         p = build_params(seed)
         result = simulate(p)
+        result["params"]["label"] = label
         run_path = batch_dir / f"CA_run_{i:02d}.json"
         save_json(result, run_path)
 
@@ -226,34 +222,35 @@ def main():
         print(
             f"[{i+1}/{args.runs}] seed={seed} "
             f"peakF={summary['peak_f']} peakR={summary['peak_r']} "
-            f"reachF={summary['reach_fake']:.2%} reachR={summary['reach_real']:.2%} [{features}]"
+            f"reachF={summary['reach_fake']:.2%} reachR={summary['reach_real']:.2%} [{label}]"
         )
 
-    # Save batch summaries
-    try:
-        import pandas as pd
-        df = pd.DataFrame(rows)
-        for col in ("reach_fake", "reach_real"):
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-            df.loc[df[col] > 1.0, col] /= 100.0
+    # save batch summaries
+    import pandas as pd
+    df = pd.DataFrame(rows)
+    for col in ("reach_fake", "reach_real"):
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+        df.loc[df[col] > 1.0, col] /= 100.0
 
-        df.to_csv(batch_dir / "summary.csv", index=False)
-        agg = {
-            "runs": args.runs, "label": label, "features": features,
-            "base_seed": base_seed,
-            "peak_f_mean": df["peak_f"].mean(), "peak_r_mean": df["peak_r"].mean(),
-            "reach_fake_mean": df["reach_fake"].mean(), "reach_real_mean": df["reach_real"].mean(),
-            "total_shares_f_mean": df["total_shares_f"].mean(),
-            "total_shares_r_mean": df["total_shares_r"].mean(),
-            "params_template": flatten_params(proto),
-        }
-        save_json({"aggregate": agg, "rows": rows}, batch_dir / "summary.json")
+    df.to_csv(batch_dir / "summary.csv", index=False)
+    agg = {
+        "runs": args.runs,
+        "label": label,
+        "features": features,
+        "base_seed": base_seed,
+        "peak_f_mean": df["peak_f"].mean(),
+        "peak_r_mean": df["peak_r"].mean(),
+        "reach_fake_mean": df["reach_fake"].mean(),
+        "reach_real_mean": df["reach_real"].mean(),
+        "total_shares_f_mean": df["total_shares_f"].mean(),
+        "total_shares_r_mean": df["total_shares_r"].mean(),
+        "params_template": flatten_params(proto),
+    }
+    save_json({"aggregate": agg, "rows": rows}, batch_dir / "summary.json")
 
-        print("\n[✓] Batch Summary:")
-        print(f"CSV  → {batch_dir/'summary.csv'}")
-        print(f"JSON → {batch_dir/'summary.json'}")
-    except Exception as e:
-        print(f"[!] Could not save summary: {e}")
+    print("\n[✓] Batch summary saved:")
+    print(f"CSV  → {batch_dir/'summary.csv'}")
+    print(f"JSON → {batch_dir/'summary.json'}")
 
 
 if __name__ == "__main__":
