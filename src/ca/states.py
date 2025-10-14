@@ -2,13 +2,34 @@ from enum import IntEnum
 from dataclasses import dataclass
 from typing import Optional
 
-# Basic cell states (kept small/int for speed later)
+
+# Keep state codes small (ints) for array speed and compact storage.
 class State(IntEnum):
     S   = 0  # Susceptible: hasn't seen anything
     E_F = 1  # Exposed to Fake (seen, not posting)
     I_F = 2  # Posting Fake
     E_R = 3  # Exposed to Real
     I_R = 4  # Posting Real
+
+
+def _assert_square_seed_limit(N: int, seeds_f0: int, seeds_r0: int) -> None:
+    if seeds_f0 < 0 or seeds_r0 < 0:
+        raise ValueError("Seed counts must be >= 0.")
+    if seeds_f0 + seeds_r0 > N * N:
+        raise ValueError("Too many seeds for grid size.")
+
+
+def _assert_scheme(name: str) -> None:
+    if name not in ("sync", "async"):
+        raise ValueError("update_scheme must be 'sync' or 'async'.")
+
+
+def _assert_prob_01(name: str, val: float) -> None:
+    v = float(val)
+    if not (0.0 <= v <= 1.0):
+        # Keep the original error text exactly
+        raise ValueError(f"{name} must be in [0,1], got {v}.")
+
 
 @dataclass
 class Params:
@@ -64,27 +85,20 @@ class Params:
         if self.N <= 0 or self.T <= 0:
             raise ValueError(f"N and T must be positive, got N={self.N}, T={self.T}.")
 
-        # Seeds
-        if self.seeds_f0 < 0 or self.seeds_r0 < 0:
-            raise ValueError("Seed counts must be >= 0.")
-        if self.seeds_f0 + self.seeds_r0 > self.N * self.N:
-            raise ValueError("Too many seeds for grid size.")
+        # Seeds sanity + grid capacity
+        _assert_square_seed_limit(self.N, self.seeds_f0, self.seeds_r0)
 
-        # Scheme
-        if self.update_scheme not in ("sync", "async"):
-            raise ValueError("update_scheme must be 'sync' or 'async'.")
+        # Scheme (sync/async)
+        _assert_scheme(self.update_scheme)
 
-        # Probabilities in [0,1]
-        prob_fields = [
+        # Probabilities that must live in [0,1]
+        for name in [
             "beta_see", "beta_share_f", "beta_share_r",
             "gamma_correction", "gamma_switch",
             "delta_decay_f", "delta_decay_r",
             "eta_misclass", "spatial_strength",
-        ]
-        for name in prob_fields:
-            v = float(getattr(self, name))
-            if not (0.0 <= v <= 1.0):
-                raise ValueError(f"{name} must be in [0,1], got {v}.")
+        ]:
+            _assert_prob_01(name, getattr(self, name))
 
         # Heterogeneity SD (>= 0)
         if float(self.hetero_sd) < 0.0:
@@ -103,9 +117,10 @@ class Params:
             try:
                 self.rng_seed = int(self.rng_seed)
             except Exception as e:
+                # Preserve exact error text
                 raise ValueError(f"rng_seed must be castable to int, got {self.rng_seed!r}.") from e
             if not (0 <= self.rng_seed <= 2**32 - 1):
                 raise ValueError(f"rng_seed must be in [0, 2**32-1], got {self.rng_seed}.")
 
-        # Keep micro_async consistent with scheme
+        # Keep micro_async consistent with scheme (original behaviour)
         self.micro_async = (self.update_scheme == "async")

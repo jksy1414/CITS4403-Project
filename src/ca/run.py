@@ -1,7 +1,8 @@
 from __future__ import annotations
+
 import argparse
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 import re
 
 from .states import Params
@@ -16,9 +17,8 @@ except Exception:
     _summarise_external = None
 
 
-# --------------------
-# Label helpers
-# --------------------
+# -------------------- Label helpers --------------------
+
 def _sanitize_label(text: str) -> str:
     t = text.strip().lower().replace(" ", "_")
     t = re.sub(r"[^a-z0-9_-]+", "", t)
@@ -35,7 +35,7 @@ def _features_suffix(p: "Params") -> str:
         tags.append("misclass")
     if getattr(p, "macro_hetero", False):
         tags.append("hetero")
-    # macro_spatial intentionally not used now; getattr safe if you add later
+    # keep spatial tag consistent with existing behaviour (optional and safe)
     if getattr(p, "macro_spatial", False):
         tags.append("spatial")
     return "_".join(tags) if tags else "baseline"
@@ -52,7 +52,7 @@ def _features_from_params_dict(params: dict) -> str:
         tags.append("misclass")
     if params.get("macro_hetero"):
         tags.append("hetero")
-    if params.get("macro_spatial"):  # safe even if absent
+    if params.get("macro_spatial"):
         tags.append("spatial")
     return "_".join(tags) if tags else "baseline"
 
@@ -72,9 +72,8 @@ def _make_batch_dir(model_name: str = "ca", label: str | None = None) -> Path:
     return d
 
 
-# --------------------
-# Summary helpers
-# --------------------
+# -------------------- Summary helpers --------------------
+
 def _derive_summary(run: dict) -> dict:
     I_f = run.get("I_f", []) or []
     I_r = run.get("I_r", []) or []
@@ -82,7 +81,7 @@ def _derive_summary(run: dict) -> dict:
     shares_r = run.get("shares_r", []) or []
     reach_fake = float(run.get("reach_fake", 0.0) or 0.0)
     reach_real = float(run.get("reach_real", 0.0) or 0.0)
-    # normalize to proportions (0..1) just in case
+    # normalise to proportions (0..1) just in case
     if reach_fake > 1.0:
         reach_fake /= 100.0
     if reach_real > 1.0:
@@ -129,7 +128,7 @@ def _print_single_summary(out: dict, path: Path) -> None:
 
     print(f"Results saved → {path}")
     print("Results:")
-    print(f"Config: {feat}")  # <--- NEW: make single-run logs self-describing
+    print(f"Config: {feat}")  # self-describing single-run logs
     print(f"Seed used: {out.get('seed_used')}")
     print(f"Peak fake (posters): {sm['peak_f']}")
     print(f"Peak real (posters): {sm['peak_r']}")
@@ -161,9 +160,12 @@ def _row_metadata(
     return meta
 
 
-# --------------------
-# Main
-# --------------------
+# -------------------- Main --------------------
+
+def _parse_flag_list(csv: str) -> set[str]:
+    return {x.strip().lower() for x in csv.split(",") if x.strip()}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run CA simulations (single or batch).")
     parser.add_argument("--runs", type=int, default=1, help="Number of simulations to run (default: 1)")
@@ -180,12 +182,14 @@ def main():
     parser.add_argument(
         "--hetero-sd", type=float, default=0.20, help="Std dev for per-agent multiplicative noise (M4 hetero)"
     )
-    parser.add_argument("--spatial-strength", type=float, default=0.35,
-                    help="Spatial strength in [0,1] for M5 (0=no effect, 1=strong)")
+    parser.add_argument(
+        "--spatial-strength", type=float, default=0.35,
+        help="Spatial strength in [0,1] for M5 (0=no effect, 1=strong)"
+    )
     args = parser.parse_args()
 
-    micro_flags = {x.strip().lower() for x in args.micro.split(",") if x.strip()}
-    macro_flags = {x.strip().lower() for x in args.macro.split(",") if x.strip()}
+    micro_flags = _parse_flag_list(args.micro)
+    macro_flags = _parse_flag_list(args.macro)
 
     base_params = dict(
         N=50,
@@ -214,7 +218,7 @@ def main():
 
             # macro toggles
             macro_hetero=("hetero" in macro_flags),   # M4
-            macro_spatial=("spatial" in macro_flags), # M5  ← NEW
+            macro_spatial=("spatial" in macro_flags), # M5
 
             # micro config
             tau_post=3,
@@ -222,8 +226,8 @@ def main():
 
             # macro configs
             hetero_sd=float(args.hetero_sd),
-            spatial_strength=float(args.spatial_strength),  # ← NEW
-            spatial_mode="radial",  # keep simple; can expose later
+            spatial_strength=float(args.spatial_strength),
+            spatial_mode="radial",
         )
         return p
 
@@ -236,7 +240,7 @@ def main():
         p = _build_params(args.seed)
         out = simulate(p)
 
-        # make single-run filename include features tag
+        # filename includes features tag
         params_dict = out.get("params", {}) or {}
         feat = _features_from_params_dict(params_dict)
         path = timestamped_run_path(model_name="ca", prefix=f"CA_{feat}")
@@ -266,7 +270,6 @@ def main():
         base_seed = int(_np.random.default_rng().integers(0, 2**32 - 1))
 
     rows = []
-
     for i in range(args.runs):
         run_seed = base_seed + i
         p = _build_params(run_seed)

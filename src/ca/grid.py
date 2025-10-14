@@ -2,12 +2,21 @@ from __future__ import annotations
 import numpy as np
 from .states import State
 
-# 8-neighbour (Moore) offsets for async/local checks
+# Moore neighbourhood (8 directions) as (di, dj) offsets
 _OFFSETS = (
     (-1, -1), (-1, 0), (-1, 1),
     ( 0, -1),          ( 0, 1),
     ( 1, -1), ( 1, 0), ( 1, 1),
 )
+
+
+def _validate_square_array(a: np.ndarray) -> None:
+    """Raise early if `a` is not a square 2-D numpy array."""
+    if not isinstance(a, np.ndarray):
+        raise TypeError("state must be a numpy.ndarray")
+    if a.ndim != 2 or a.shape[0] != a.shape[1]:
+        raise ValueError("state must be a square 2-D array of shape (N, N)")
+
 
 def posting_neighbour_flags(state: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -18,17 +27,13 @@ def posting_neighbour_flags(state: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
     Complexity: O(N^2) per call with small constant factors.
     """
-    # Basic sanity checks to catch accidental misuse early.
-    if not isinstance(state, np.ndarray):
-        raise TypeError("state must be a numpy.ndarray")
-    if state.ndim != 2 or state.shape[0] != state.shape[1]:
-        raise ValueError("state must be a square 2-D array of shape (N, N)")
+    _validate_square_array(state)
 
     # Posters at this snapshot
     I_F = (state == State.I_F)
     I_R = (state == State.I_R)
 
-    # Build the eight rolled views and OR-reduce them.
+    # Build the eight wrapped views and OR-reduce them into visibility flags.
     rolls_f = [np.roll(np.roll(I_F, di, axis=0), dj, axis=1) for di, dj in _OFFSETS]
     rolls_r = [np.roll(np.roll(I_R, di, axis=0), dj, axis=1) for di, dj in _OFFSETS]
 
@@ -54,10 +59,7 @@ def posting_neighbour_flags_local(state: np.ndarray, i: int, j: int) -> tuple[bo
     This is O(1) per query and should be used during per-cell updates when
     the grid is being updated in-place.
     """
-    if not isinstance(state, np.ndarray):
-        raise TypeError("state must be a numpy.ndarray")
-    if state.ndim != 2 or state.shape[0] != state.shape[1]:
-        raise ValueError("state must be a square 2-D array of shape (N, N)")
+    _validate_square_array(state)
 
     N = state.shape[0]
     saw_f = False
