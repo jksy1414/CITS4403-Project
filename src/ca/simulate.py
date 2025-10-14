@@ -1,14 +1,20 @@
 from __future__ import annotations
+
+from dataclasses import replace
 import numpy as np
-from dataclasses import replace  # <-- add this
-from .states import State, Params
+
+from .states import Params, State
 from .grid import posting_neighbour_flags, posting_neighbour_flags_local
 from .rules import update_cell
 
-# ---------- Seeding ----------
+
+# ---------- Seeding ----------------------------------------------------------
 
 def seed_initial(N: int, seeds_f0: int, seeds_r0: int, rng: np.random.Generator) -> np.ndarray:
-    """Initialise an N×N grid with seeds_f0 fake posters and seeds_r0 real posters."""
+    """
+    Make an N×N grid and drop in `seeds_f0` fake posters and `seeds_r0` real posters.
+    Remaining cells start as S (susceptible).
+    """
     state = np.full((N, N), State.S, dtype=np.int8)
     total = seeds_f0 + seeds_r0
     if total > 0:
@@ -18,13 +24,13 @@ def seed_initial(N: int, seeds_f0: int, seeds_r0: int, rng: np.random.Generator)
     return state
 
 
-# ---------- Optional macro helpers (kept for future use) ----------
+# ---------- Optional macro field helpers (kept for future use) ---------------
 
 def _hetero_multipliers(N: int, rng: np.random.Generator, sd: float) -> tuple[np.ndarray, np.ndarray]:
     """
-    Returns two NxN fields (for fake, real) ~ lognormal noise with mean ~1.
-    sd is the stdev of the underlying normal; we clamp to [0.3, 2.0] to avoid extremes.
-    (Note: currently not wired into rules; kept for future M5 work.)
+    Two (N×N) lognormal fields for fake/real with mean≈1.
+    Clamped to [0.3, 2.0] to avoid extremes.
+    (Note: kept for future work; current simulate() uses a simplified path.)
     """
     if sd <= 0:
         ones = np.ones((N, N), dtype=float)
@@ -38,9 +44,9 @@ def _hetero_multipliers(N: int, rng: np.random.Generator, sd: float) -> tuple[np
 
 def _spatial_field(N: int, strength: float, mode: str = "radial") -> np.ndarray:
     """
-    Spatial weight W[i,j] in [0,1]. W=1 means no change, lower values damp sharing/seeing.
-    We construct a base pattern G in [0,1], then mix: W = (1-strength) + strength*G.
-    (Note: currently not wired into rules; kept for future M6 work.)
+    Spatial weight W[i,j] in [0,1]. W=1 means neutral; smaller values damp.
+    Construct base pattern G in [0,1], then W = (1-strength) + strength*G.
+    (Note: kept for future work; current simulate() uses a simplified path.)
     """
     if strength <= 0.0:
         return np.ones((N, N), dtype=float)
@@ -50,19 +56,24 @@ def _spatial_field(N: int, strength: float, mode: str = "radial") -> np.ndarray:
     X, Y = np.meshgrid(x, y)
 
     if mode == "x-gradient":
-        G = (X + 1.0) / 2.0  # 0..1 left->right
+        G = (X + 1.0) / 2.0  # 0..1 left→right
     else:
-        R2 = X**2 + Y**2     # radial bump: 1 at center, ~0 at corners
+        R2 = X**2 + Y**2
         G = np.clip(1.0 - R2, 0.0, 1.0)
 
     W = (1.0 - strength) + strength * G
     return np.clip(W, 0.0, 1.0)
 
 
-# ---------- Core ticks ----------
+# ---------- Misclassification -------------------------------------------------
 
-def _apply_misclass_mask(rng: np.random.Generator, saw_f: np.ndarray, saw_r: np.ndarray, eta: float):
-    """Flip saw_f/saw_r elementwise with prob eta (simple swap) to model misperception."""
+def _apply_misclass_mask(
+    rng: np.random.Generator,
+    saw_f: np.ndarray,
+    saw_r: np.ndarray,
+    eta: float,
+):
+    """Swap saw_f/saw_r elementwise with probability `eta` (simple flip)."""
     if eta <= 0.0:
         return saw_f, saw_r
     mask = rng.random(saw_f.shape) < eta
@@ -73,20 +84,24 @@ def _apply_misclass_mask(rng: np.random.Generator, saw_f: np.ndarray, saw_r: np.
     return saw_f, saw_r
 
 
-def _tick_sync(state: np.ndarray,
-               cooldown: np.ndarray | None,
-               rng: np.random.Generator,
-               p: Params,
-               beta_see_eff: np.ndarray,
-               beta_share_f_eff: np.ndarray,
-               beta_share_r_eff: np.ndarray) -> tuple[np.ndarray, np.ndarray | None, int, int, np.ndarray, np.ndarray]:
-    """Synchronous update with macro-scaled effective probabilities."""
+# ---------- Tick implementations --------------------------------------------
+
+def _tick_sync(
+    state: np.ndarray,
+    cooldown: np.ndarray | None,
+    rng: np.random.Generator,
+    p: Params,
+    beta_see_eff: np.ndarray,
+    beta_share_f_eff: np.ndarray,
+    beta_share_r_eff: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray | None, int, int, np.ndarray, np.ndarray]:
+    """Synchronous update (use neighbour snapshot for all cells)."""
     saw_f, saw_r = posting_neighbour_flags(state)
 
     if p.micro_misclass and p.eta_misclass > 0.0:
         saw_f, saw_r = _apply_misclass_mask(rng, saw_f, saw_r, p.eta_misclass)
 
-    # Reach is whether a cell has ever *seen or been* fake/real by this tick.
+    # Reach bookkeeping (ever saw or was in that category)
     ever_fake = (saw_f | (state == State.I_F) | (state == State.E_F))
     ever_real = (saw_r | (state == State.I_R) | (state == State.E_R))
 
@@ -99,8 +114,8 @@ def _tick_sync(state: np.ndarray,
         for j in range(N):
             # local macro-scaled probabilities
             bsee = float(beta_see_eff[i, j])
-            bsf  = float(beta_share_f_eff[i, j])
-            bsr  = float(beta_share_r_eff[i, j])
+            bsf = float(beta_share_f_eff[i, j])
+            bsr = float(beta_share_r_eff[i, j])
 
             # clone Params with local betas (only these 3 fields differ)
             p_loc = replace(p, beta_see=bsee, beta_share_f=bsf, beta_share_r=bsr)
@@ -112,6 +127,7 @@ def _tick_sync(state: np.ndarray,
                 p_loc, rng,
                 cooldown=cd_in,
             )
+
             next_state[i, j] = ns
             if p.micro_refractory and cooldown is not None:
                 cooldown[i, j] = cd_out
@@ -121,20 +137,22 @@ def _tick_sync(state: np.ndarray,
     return next_state, cooldown, new_f, new_r, ever_fake, ever_real
 
 
-def _tick_async(state: np.ndarray,
-                cooldown: np.ndarray | None,
-                rng: np.random.Generator,
-                p: Params,
-                beta_see_eff: np.ndarray,
-                beta_share_f_eff: np.ndarray,
-                beta_share_r_eff: np.ndarray) -> tuple[np.ndarray, np.ndarray | None, int, int, np.ndarray, np.ndarray]:
-    """Asynchronous update with macro-scaled effective probabilities."""
+def _tick_async(
+    state: np.ndarray,
+    cooldown: np.ndarray | None,
+    rng: np.random.Generator,
+    p: Params,
+    beta_see_eff: np.ndarray,
+    beta_share_f_eff: np.ndarray,
+    beta_share_r_eff: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray | None, int, int, np.ndarray, np.ndarray]:
+    """Asynchronous update (cells update in random order against current state)."""
     N = p.N
     order = rng.permutation(N * N)
     new_f = 0
     new_r = 0
 
-    # We still accumulate reach from a snapshot at the beginning of the tick
+    # Snapshot for 'ever seen' bookkeeping
     saw_f0, saw_r0 = posting_neighbour_flags(state)
     if p.micro_misclass and p.eta_misclass > 0.0:
         saw_f0, saw_r0 = _apply_misclass_mask(rng, saw_f0, saw_r0, p.eta_misclass)
@@ -144,17 +162,17 @@ def _tick_async(state: np.ndarray,
     for idx in order:
         i, j = divmod(idx, N)
 
-        # Local neighbour flags against the *current* state (in-place updating).
+        # Local neighbour flags against the current (in-place evolving) state
         sf_loc, sr_loc = posting_neighbour_flags_local(state, i, j)
         if p.micro_misclass and p.eta_misclass > 0.0:
-            # Apply a per-cell coin for misclass in async path.
+            # Per-cell flip coin in async path
             if rng.random() < p.eta_misclass:
                 sf_loc, sr_loc = sr_loc, sf_loc
 
         # local macro-scaled probabilities
         bsee = float(beta_see_eff[i, j])
-        bsf  = float(beta_share_f_eff[i, j])
-        bsr  = float(beta_share_r_eff[i, j])
+        bsf = float(beta_share_f_eff[i, j])
+        bsr = float(beta_share_r_eff[i, j])
 
         # clone Params with local betas (only these 3 fields differ)
         p_loc = replace(p, beta_see=bsee, beta_share_f=bsf, beta_share_r=bsr)
@@ -166,6 +184,7 @@ def _tick_async(state: np.ndarray,
             p_loc, rng,
             cooldown=cd_in,
         )
+
         state[i, j] = ns
         if p.micro_refractory and cooldown is not None:
             cooldown[i, j] = cd_out
@@ -174,10 +193,18 @@ def _tick_async(state: np.ndarray,
 
     return state, cooldown, new_f, new_r, ever_fake, ever_real
 
-# ---------- simulate ----------
+
+# ---------- simulate ---------------------------------------------------------
 
 def simulate(p: Params) -> dict:
-    """Run the simulation for T steps and return time series and summary metrics."""
+    """
+    Run the model for T ticks and return a dictionary with:
+      I_f/I_r (active posters per tick), shares_f/shares_r (new shares per tick),
+      reach_fake/reach_real (proportions), and params+seed details.
+    Behaviour is identical to the original: RNG seeding, macro fields,
+    effective probability scaling, and async/sync branching are all preserved.
+    """
+    # RNG: if rng_seed is None, draw one and then re-seed for reproducibility
     rng = np.random.default_rng(p.rng_seed)
     seed_used = int(rng.integers(0, 2**32 - 1)) if p.rng_seed is None else p.rng_seed
     if p.rng_seed is None:
@@ -214,7 +241,7 @@ def simulate(p: Params) -> dict:
     M = (H * W).astype(np.float32)
     M = np.clip(M, 0.1, 4.0)
 
-    # Precompute effective probabilities for this run
+    # Precompute effective probabilities for this run (exact same formulas)
     beta_see_eff     = np.clip(float(p.beta_see)     * W, 0.0, 1.0).astype(np.float32)
     beta_share_f_eff = np.clip(float(p.beta_share_f) * M, 0.0, 1.0).astype(np.float32)
     beta_share_r_eff = np.clip(float(p.beta_share_r) * M, 0.0, 1.0).astype(np.float32)
@@ -248,7 +275,7 @@ def simulate(p: Params) -> dict:
     reach_real = float(np.mean(ever_real))
 
     return {
-        "N": N, "T": T, "seed_used": seed_used,
+        "N": p.N, "T": p.T, "seed_used": seed_used,
         "I_f": I_f, "I_r": I_r,
         "shares_f": shares_f, "shares_r": shares_r,
         "reach_fake": reach_fake, "reach_real": reach_real,
