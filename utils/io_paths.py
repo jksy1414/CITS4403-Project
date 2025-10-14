@@ -1,7 +1,6 @@
 from pathlib import Path
 from datetime import datetime
 
-# Base directory = project root (one level above 'utils')
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 def runs_dir(model_name: str = "ca") -> Path:
