@@ -2,7 +2,7 @@ from enum import IntEnum
 from dataclasses import dataclass
 from typing import Optional
 
-# Basic cell states (kept small/int for speed later)
+# Basic cell states 
 class State(IntEnum):
     S   = 0  # Susceptible: hasn't seen anything
     E_F = 1  # Exposed to Fake (seen, not posting)
@@ -13,8 +13,8 @@ class State(IntEnum):
 @dataclass
 class Params:
     # World / timing
-    N: int = 50                   # grid N x N (population size for CA)
-    T: int = 60                   # number of time steps
+    N: int = 50  # (population size for CA)
+    T: int = 60  # (number of time steps)
 
     # Behaviour probabilities
     beta_see: float = 0.35
@@ -26,8 +26,8 @@ class Params:
     seeds_r0: int = 10
 
     # Correction / switch mechanics
-    gamma_correction: float = 0.70  # seeing real lowers chance to share fake
-    gamma_switch: float = 0.30      # posters of fake may switch to real
+    gamma_correction: float = 0.70  # seeing real lower the chance to share fake news
+    gamma_switch: float = 0.30      # posters of fake may switch to real news
 
     # Natural decay of attention (forgetting)
     delta_decay_f: float = 0.12     # fake forgets faster
@@ -40,19 +40,19 @@ class Params:
     update_scheme: str = "sync"     # "sync" or "async"
 
     # Micro features
-    micro_async: bool = False          # will mirror update_scheme
-    micro_refractory: bool = False     # cooldown τ
-    micro_misclass: bool = False       # enable misclassification
+    micro_async: bool = False          
+    micro_refractory: bool = False     
+    micro_misclass: bool = False       
 
     # Macro features
     macro_hetero: bool = False
     macro_spatial: bool = False
 
     # Refractory configuration
-    tau_post: int = 3                  # number of ticks a poster is 'locked'
-
+    tau_post: int = 3                  
+    
     # Misclassification configuration
-    eta_misclass: float = 0.02         # probability to misread fake<->real
+    eta_misclass: float = 0.02         
 
     # Heterogeneity / spatial configuration
     hetero_sd: float = 0.20            # std dev for multiplicative noise

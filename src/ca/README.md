@@ -3,8 +3,6 @@
 This folder contains the **Cellular Automata (CA) implementation** for simulating the spread of fake vs real news.  
 Each file has a specific role in the model:
 
----
-
 ## Files
 
 ### `states.py`
