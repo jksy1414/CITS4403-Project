@@ -1,103 +1,83 @@
 # CITS4403 — CA Model of Fake vs Real Information Spread
 
-## A simple guide to set up and run the simulation model for analysing how fake and real information spread using a Cellular Automata (CA) approach.
-
-### 1. Preparation
-Before running the project, ensure you have Python 3.11+ installed.
+## 1. Preparation
+Before running the project, ensure you have Python 3.07 installed.
 Then, create a virtual environment and install the required dependencies.
 
 Create and activate a virtual environment:
+```bash
     python -m venv .venv
     # For macOS/Linux
     source .venv/bin/activate
     # For Windows
     .venv\\Scripts\\activate
-
-Install dependencies:
-    pip install -r requirements.txt
-
-### 2. Running the Simulation
-All simulations are run using the following pattern:
-    python -m src.ca.run
-
-Where:
-- src.ca.run points to the Cellular Automata (CA) simulation engine.
-- [OPTIONS] are arguments that modify how the model behaves.
-
-Available Command-line Arguments
-
---scheme (sync or async, default: sync)
-
-Determines whether updates are synchronous (all agents update together) or asynchronous (random order).
-
---runs (integer, default: 1)
-
-Number of independent runs to perform. Useful for batch mode.
-
---label (string, default: None)
-
-Optional label added to output folder names.
-
---seed (integer, default: None)
-
-RNG seed for reproducibility.
-
---micro (comma-separated, default: "")
-
-Toggles for micro-level behaviours — available options:
-async, refractory, misclass.
-
---macro (comma-separated, default: "")
-
-Toggles for macro-level factors — available options:
-hetero, spatial.
-
---eta (float [0–1], default: 0.02)
-
-Misclassification probability (chance that an agent misreads fake ↔ real).
-
---hetero-sd (float [0–1], default: 0.20)
-
-Standard deviation controlling variation in individual behaviour (heterogeneity).
-
---spatial-strength (float [0–1], default: 0.35)
-
-Controls the strength of spatial influence — 0 means no effect, 1 means strong spatial variation.
-
-Example：
-``` 
-- python -m src.ca.run --scheme sync --runs 1
-
-- python -m src.ca.run --scheme async --micro async refractory,misclass --eta 0.02 --runs 1
 ```
 
-### 3. Outputs
+Install dependencies:
+```bash
+    pip install -r requirements.txt
+```
+
+## 2. Running the Simulation
+All simulations are run using the following pattern:
+```bash
+    python -m src.ca.run [Option]
+```
+Key Option are 
+```bash
+--scheme {sync,async}: update engine (default sync)
+--runs INT: number of independent runs (default 1)
+--label STR: optional tag added to output folder name
+--seed INT: RNG seed (optional)
+--micro LIST: micro behaviours (comma-separated): async,refractory,misclass
+--macro LIST: macro factors (comma-separated): hetero,spatial
+--eta FLOAT: misclassification rate (default 0.02)
+--hetero-sd FLOAT: heterogeneity SD (default 0.20)
+--spatial-strength FLOAT: spatial strength (default 0.35)
+```
+
+Examples: 
+Phase 0 baseline (sync engine, no micro/macro):
+```bash 
+python -m src.ca.run --scheme sync --runs 20
+```
+
+Macro only:
+```bash
+python -m src.ca.run --macro hetero --hetero-sd 0.20 --runs 20
+python -m src.ca.run --macro spatial --spatial-strength 0.35 --runs 20
+python -m src.ca.run --macro hetero,spatial --hetero-sd 0.20 --spatial-strength 0.35 --runs 20
+```
+
+## 3. Outputs
 All outputs are saved automatically under:
+```bash
     data/runs/ca/
+```
+The result consist of: 
+- Single runs: one JSON per run (time series + params)
+- Batch runs: summary.csv and summary.json in the batch folder
 
-Each run produces a JSON file containing parameters, time-series, and reach values.
-Batch runs also generate summary.csv and summary.json files.
+## 4. Visualising Results
+If you’re using the notebook utilities that write Excel/figures, they’ll save under data/figures/phase*/
 
-### 4. Visualising Results
-You can load and plot any simulation result with the provided utilities.
-
-Example:
-from utils.io import load_json
-from utils.plotting import plot_macro, plot_shares
+```bash
+from src.ca.io import load_json         # adjust import to your actual path
+from src.ca.plotting import plot_macro, plot_shares  # if you keep these helpers
 import matplotlib.pyplot as plt
 
-run = load_json("data/runs/ca/CA_baseline_20251012-165225.json")
+run = load_json("data/runs/ca/baseline_20251013-180746/run_0001.json")
 plot_macro(run, title="Active Posters Over Time")
 plot_shares(run, title="New Shares per Step")
 plt.show()
-
-This will display graphs comparing fake vs real spread dynamics.
-
-### 5. Reproducibility
+```
+## 5. Reproducibility
 - Every run embeds its parameters and random seed in the JSON file.
 - Running with the same seed reproduces identical results.
 - Batch runs summarise metrics such as reach and peak times.
 
 ### 6. Tests
-To run basic tests (if available):
+To run basic tests:
+```bash
     pytest -q
+```
