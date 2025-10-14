@@ -1,348 +1,259 @@
 from __future__ import annotations
 import argparse
-from pathlib import Path
-from datetime import datetime
 import re
+from datetime import datetime
+from pathlib import Path
 
 from .states import Params
 from .simulate import simulate
 
-from utils.io import save_json
-from utils.io_paths import runs_dir, timestamped_run_path
+# Updated util imports (reflecting your new filenames)
+from utils.json_utils import save_json
+from utils.path_utils import runs_dir, timestamped_run_path
 
 try:
-    from utils.metrics import summarise as _summarise_external
+    from utils.metrics_tools import summarise as summarise_external
 except Exception:
-    _summarise_external = None
+    summarise_external = None
 
 
-# --------------------
-# Label helpers
-# --------------------
-def _sanitize_label(text: str) -> str:
-    t = text.strip().lower().replace(" ", "_")
-    t = re.sub(r"[^a-z0-9_-]+", "", t)
-    return t or "run"
+# ---------------------------------------------------------------------
+# Label and feature utilities
+# ---------------------------------------------------------------------
+
+def clean_label(text: str) -> str:
+    """Standardize a string for filenames or directories."""
+    label = text.strip().lower().replace(" ", "_")
+    return re.sub(r"[^a-z0-9_-]+", "", label) or "run"
 
 
-def _features_suffix(p: "Params") -> str:
+def describe_features(params: Params | dict) -> str:
+    """Generate a readable tag summarizing which features are enabled."""
+    src = vars(params) if isinstance(params, Params) else params
     tags = []
-    if p.update_scheme == "async":
+    if src.get("update_scheme") == "async":
         tags.append("async")
-    if getattr(p, "micro_refractory", False):
+    if src.get("micro_refractory"):
         tags.append("refractory")
-    if getattr(p, "micro_misclass", False):
+    if src.get("micro_misclass"):
         tags.append("misclass")
-    if getattr(p, "macro_hetero", False):
+    if src.get("macro_hetero"):
         tags.append("hetero")
-    # macro_spatial intentionally not used now; getattr safe if you add later
-    if getattr(p, "macro_spatial", False):
+    if src.get("macro_spatial"):
         tags.append("spatial")
     return "_".join(tags) if tags else "baseline"
 
 
-def _features_from_params_dict(params: dict) -> str:
-    """Derive the same feature tag from a run's saved params dict."""
-    tags = []
-    if params.get("update_scheme") == "async":
-        tags.append("async")
-    if params.get("micro_refractory"):
-        tags.append("refractory")
-    if params.get("micro_misclass"):
-        tags.append("misclass")
-    if params.get("macro_hetero"):
-        tags.append("hetero")
-    if params.get("macro_spatial"):  # safe even if absent
-        tags.append("spatial")
-    return "_".join(tags) if tags else "baseline"
+def auto_label(base: str | None, params: Params) -> str:
+    """Append the feature suffix to a base label."""
+    suffix = describe_features(params)
+    return f"{clean_label(base)}_{suffix}" if base else suffix
 
 
-def _auto_label(base_label: str | None, p: "Params") -> str:
-    suffix = _features_suffix(p)
-    if base_label:
-        return f"{_sanitize_label(base_label)}_{suffix}"
-    return suffix
-
-
-def _make_batch_dir(model_name: str = "ca", label: str | None = None) -> Path:
-    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+def create_batch_dir(model_name: str = "ca", label: str | None = None) -> Path:
+    """Create a timestamped directory to store batch runs."""
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     base = runs_dir(model_name)
-    d = base / (f"{_sanitize_label(label)}_{ts}" if label else f"batch_{ts}")
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    name = f"{clean_label(label)}_{timestamp}" if label else f"batch_{timestamp}"
+    path = base / name
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
-# --------------------
-# Summary helpers
-# --------------------
-def _derive_summary(run: dict) -> dict:
-    I_f = run.get("I_f", []) or []
-    I_r = run.get("I_r", []) or []
-    shares_f = run.get("shares_f", []) or []
-    shares_r = run.get("shares_r", []) or []
-    reach_fake = float(run.get("reach_fake", 0.0) or 0.0)
-    reach_real = float(run.get("reach_real", 0.0) or 0.0)
-    # normalize to proportions (0..1) just in case
-    if reach_fake > 1.0:
-        reach_fake /= 100.0
-    if reach_real > 1.0:
-        reach_real /= 100.0
+# ---------------------------------------------------------------------
+# Result summarisation
+# ---------------------------------------------------------------------
+
+def summarize_run(result: dict) -> dict:
+    """Compute core statistics (peaks, reach, totals) from simulation output."""
+    I_f, I_r = result.get("I_f", []), result.get("I_r", [])
+    shares_f, shares_r = result.get("shares_f", []), result.get("shares_r", [])
+    reach_f, reach_r = float(result.get("reach_fake", 0.0)), float(result.get("reach_real", 0.0))
+
+    # Normalize reach (percentage to proportion)
+    if reach_f > 1.0: reach_f /= 100.0
+    if reach_r > 1.0: reach_r /= 100.0
 
     peak_f = max(I_f) if I_f else 0
     peak_r = max(I_r) if I_r else 0
-    t_peak_f = (I_f.index(peak_f) if I_f and (peak_f in I_f) else None)
-    t_peak_r = (I_r.index(peak_r) if I_r and (peak_r in I_r) else None)
+    t_peak_f = I_f.index(peak_f) if peak_f in I_f else None
+    t_peak_r = I_r.index(peak_r) if peak_r in I_r else None
 
     return {
-        "peak_f": peak_f,
-        "peak_r": peak_r,
-        "t_peak_f": t_peak_f,
-        "t_peak_r": t_peak_r,
+        "peak_f": peak_f, "peak_r": peak_r,
+        "t_peak_f": t_peak_f, "t_peak_r": t_peak_r,
         "total_shares_f": int(sum(shares_f)),
         "total_shares_r": int(sum(shares_r)),
-        "reach_fake": reach_fake,
-        "reach_real": reach_real,
+        "reach_fake": reach_f, "reach_real": reach_r,
     }
 
 
-def _normalize_reach_in_place(d: dict) -> None:
-    for k in ("reach_fake", "reach_real"):
-        if k in d and d[k] is not None:
-            try:
-                v = float(d[k])
-                d[k] = v / 100.0 if v > 1.0 else v
-            except (TypeError, ValueError):
-                d[k] = 0.0
-
-
-def _print_single_summary(out: dict, path: Path) -> None:
-    sm = _derive_summary(out)
-    if _summarise_external is not None:
+def print_summary(result: dict, path: Path) -> None:
+    """Display concise metrics after each run."""
+    summary = summarize_run(result)
+    if summarise_external:
         try:
-            ext = _summarise_external(out) or {}
-            sm.update(ext)
+            summary.update(summarise_external(result) or {})
         finally:
-            _normalize_reach_in_place(sm)
-
-    params = out.get("params", {}) or {}
-    feat = _features_from_params_dict(params)
+            for k in ("reach_fake", "reach_real"):
+                if summary.get(k, 0) > 1.0:
+                    summary[k] /= 100.0
 
     print(f"Results saved → {path}")
-    print("Results:")
-    print(f"Config: {feat}")  # <--- NEW: make single-run logs self-describing
-    print(f"Seed used: {out.get('seed_used')}")
-    print(f"Peak fake (posters): {sm['peak_f']}")
-    print(f"Peak real (posters): {sm['peak_r']}")
-    print(f"Reach — Fake: {sm['reach_fake']:.2%}, Real: {sm['reach_real']:.2%}")
-    print(f"Total shares — Fake: {sm['total_shares_f']}, Real: {sm['total_shares_r']}")
-    print(f"Time to peak — Fake: {sm['t_peak_f']}, Real: {sm['t_peak_r']}")
+    print("Summary:")
+    print(f"Features: {describe_features(result.get('params', {}))}")
+    print(f"Seed used: {result.get('seed_used')}")
+    print(f"Peak fake: {summary['peak_f']}, Peak real: {summary['peak_r']}")
+    print(f"Reach — Fake: {summary['reach_fake']:.2%}, Real: {summary['reach_real']:.2%}")
+    print(f"Total shares — Fake: {summary['total_shares_f']}, Real: {summary['total_shares_r']}")
+    print(f"Time to peak — Fake: {summary['t_peak_f']}, Real: {summary['t_peak_r']}")
 
 
-def _params_to_columns(p: "Params") -> dict:
-    d = dict(p.__dict__)
-    out = {}
-    for k, v in d.items():
-        out[f"param_{k}"] = v
-    return out
+# ---------------------------------------------------------------------
+# Parameter flattening and metadata
+# ---------------------------------------------------------------------
+
+def flatten_params(p: Params) -> dict:
+    """Convert Params dataclass to flat dictionary with 'param_' prefixes."""
+    return {f"param_{k}": v for k, v in vars(p).items()}
 
 
-def _row_metadata(
-    p: "Params", label: str, features: str, seed_used: int, run_index: int, json_path: Path
-) -> dict:
+def metadata_row(p: Params, label: str, features: str, seed: int, idx: int, path: Path) -> dict:
     meta = {
-        "label": label,
-        "features": features,
-        "update_scheme": p.update_scheme,
-        "run_index": run_index,
-        "seed": seed_used,
-        "json_path": str(json_path),
+        "label": label, "features": features, "update_scheme": p.update_scheme,
+        "run_index": idx, "seed": seed, "json_path": str(path)
     }
-    meta.update(_params_to_columns(p))
+    meta.update(flatten_params(p))
     return meta
 
 
-# --------------------
-# Main
-# --------------------
+# ---------------------------------------------------------------------
+# Main execution
+# ---------------------------------------------------------------------
+
 def main():
-    parser = argparse.ArgumentParser(description="Run CA simulations (single or batch).")
-    parser.add_argument("--runs", type=int, default=1, help="Number of simulations to run (default: 1)")
-    parser.add_argument("--seed", type=int, default=None, help="Base RNG seed (optional). Batch uses seed+i.")
-    parser.add_argument("--label", type=str, default=None, help="Custom prefix for batch folder (optional).")
-    parser.add_argument(
-        "--scheme", type=str, default="sync", choices=["sync", "async"], help="Update scheme (sync or async)."
-    )
+    parser = argparse.ArgumentParser(description="Run CA simulation (single or batch mode).")
+    parser.add_argument("--runs", type=int, default=1)
+    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--label", type=str, default=None)
+    parser.add_argument("--scheme", type=str, default="sync", choices=["sync", "async"])
     parser.add_argument("--micro", type=str, default="", help="Comma-separated micro toggles: async,refractory,misclass")
     parser.add_argument("--macro", type=str, default="", help="Comma-separated macro toggles: hetero,spatial")
-    parser.add_argument(
-        "--eta", type=float, default=0.02, help="Misclassification probability η in [0,1] (default 0.02)."
-    )
-    parser.add_argument(
-        "--hetero-sd", type=float, default=0.20, help="Std dev for per-agent multiplicative noise (M4 hetero)"
-    )
-    parser.add_argument("--spatial-strength", type=float, default=0.35,
-                    help="Spatial strength in [0,1] for M5 (0=no effect, 1=strong)")
+    parser.add_argument("--eta", type=float, default=0.02)
+    parser.add_argument("--hetero-sd", type=float, default=0.20)
+    parser.add_argument("--spatial-strength", type=float, default=0.35)
     args = parser.parse_args()
 
-    micro_flags = {x.strip().lower() for x in args.micro.split(",") if x.strip()}
-    macro_flags = {x.strip().lower() for x in args.macro.split(",") if x.strip()}
+    micro = {x.strip().lower() for x in args.micro.split(",") if x.strip()}
+    macro = {x.strip().lower() for x in args.macro.split(",") if x.strip()}
 
     base_params = dict(
-        N=50,
-        T=60,
-        seeds_f0=6,
-        seeds_r0=5,
-        beta_see=0.35,
-        beta_share_f=0.50,
-        beta_share_r=0.40,
-        gamma_correction=0.7,
-        gamma_switch=0.3,
-        delta_decay_f=0.12,
-        delta_decay_r=0.06,
+        N=50, T=60, seeds_f0=6, seeds_r0=5,
+        beta_see=0.35, beta_share_f=0.50, beta_share_r=0.40,
+        gamma_correction=0.7, gamma_switch=0.3,
+        delta_decay_f=0.12, delta_decay_r=0.06
     )
 
-    def _build_params(seed: int | None) -> "Params":
-        p = Params(
+    def build_params(seed: int | None) -> Params:
+        return Params(
             **base_params,
             rng_seed=seed,
             update_scheme=args.scheme,
-
-            # micro toggles
-            micro_async=("async" in micro_flags) or (args.scheme == "async"),
-            micro_refractory=("refractory" in micro_flags),
-            micro_misclass=("misclass" in micro_flags),
-
-            # macro toggles
-            macro_hetero=("hetero" in macro_flags),   # M4
-            macro_spatial=("spatial" in macro_flags), # M5  ← NEW
-
-            # micro config
-            tau_post=3,
-            eta_misclass=float(args.eta),
-
-            # macro configs
-            hetero_sd=float(args.hetero_sd),
-            spatial_strength=float(args.spatial_strength),  # ← NEW
-            spatial_mode="radial",  # keep simple; can expose later
+            micro_async=("async" in micro) or (args.scheme == "async"),
+            micro_refractory=("refractory" in micro),
+            micro_misclass=("misclass" in micro),
+            macro_hetero=("hetero" in macro),
+            macro_spatial=("spatial" in macro),
+            tau_post=3, eta_misclass=args.eta,
+            hetero_sd=args.hetero_sd,
+            spatial_strength=args.spatial_strength,
+            spatial_mode="radial",
         )
-        return p
 
-    proto_p = _build_params(args.seed)
-    features = _features_suffix(proto_p)
-    effective_label = _auto_label(args.label, proto_p)
+    proto = build_params(args.seed)
+    features = describe_features(proto)
+    label = auto_label(args.label, proto)
 
-    # single run
+    # --- Single run ---
     if args.runs <= 1:
-        p = _build_params(args.seed)
-        out = simulate(p)
+        p = build_params(args.seed)
+        result = simulate(p)
+        feature_tag = describe_features(result.get("params", {}))
+        path = timestamped_run_path(model="ca", prefix=f"CA_{feature_tag}")
+        save_json(result, path)
+        print_summary(result, path)
 
-        # make single-run filename include features tag
-        params_dict = out.get("params", {}) or {}
-        feat = _features_from_params_dict(params_dict)
-        path = timestamped_run_path(model_name="ca", prefix=f"CA_{feat}")
-
-        save_json(out, path)
-        _print_single_summary(out, path)
-
-        sm = _derive_summary(out)
-        if _summarise_external is not None:
+        summary = summarize_run(result)
+        if summarise_external:
             try:
-                ext = _summarise_external(out) or {}
-                sm.update(ext)
+                summary.update(summarise_external(result) or {})
             finally:
-                _normalize_reach_in_place(sm)
+                for k in ("reach_fake", "reach_real"):
+                    if summary.get(k, 0) > 1.0:
+                        summary[k] /= 100.0
 
-        sm.update(_row_metadata(p, effective_label, features, out.get("seed_used", args.seed), 0, path))
-        save_json({"aggregate": None, "rows": [sm]}, Path(str(path).replace(".json", "_summary.json")))
+        summary.update(metadata_row(p, label, features, result.get("seed_used", args.seed), 0, path))
+        save_json({"aggregate": None, "rows": [summary]}, path.with_name(path.stem + "_summary.json"))
         return
 
-    # batch
-    batch_dir = _make_batch_dir(model_name="ca", label=effective_label)
-    print(f"Batch dir → {batch_dir}")
+    # --- Batch run ---
+    import numpy as np
+    batch_dir = create_batch_dir("ca", label)
+    print(f"Batch output → {batch_dir}")
 
-    base_seed = args.seed
-    if base_seed is None:
-        import numpy as _np
-        base_seed = int(_np.random.default_rng().integers(0, 2**32 - 1))
-
+    base_seed = args.seed or int(np.random.default_rng().integers(0, 2**32 - 1))
     rows = []
 
     for i in range(args.runs):
-        run_seed = base_seed + i
-        p = _build_params(run_seed)
-        out = simulate(p)
-
+        seed = base_seed + i
+        p = build_params(seed)
+        result = simulate(p)
         run_path = batch_dir / f"CA_run_{i:02d}.json"
-        save_json(out, run_path)
+        save_json(result, run_path)
 
-        sm = _derive_summary(out)
-        if _summarise_external is not None:
+        summary = summarize_run(result)
+        if summarise_external:
             try:
-                ext = _summarise_external(out) or {}
-                sm.update(ext)
+                summary.update(summarise_external(result) or {})
             finally:
-                _normalize_reach_in_place(sm)
+                for k in ("reach_fake", "reach_real"):
+                    if summary.get(k, 0) > 1.0:
+                        summary[k] /= 100.0
 
-        seed_used = out.get("seed_used", run_seed)
-        sm.update(_row_metadata(p, effective_label, features, seed_used, i, run_path))
-        rows.append(sm)
+        summary.update(metadata_row(p, label, features, result.get("seed_used", seed), i, run_path))
+        rows.append(summary)
 
         print(
-            f"[{i+1}/{args.runs}] seed={seed_used} "
-            f"peak_f={sm['peak_f']} peak_r={sm['peak_r']} "
-            f"reachF={sm['reach_fake']:.2%} reachR={sm['reach_real']:.2%} "
-            f"[{features}]"
+            f"[{i+1}/{args.runs}] seed={seed} "
+            f"peakF={summary['peak_f']} peakR={summary['peak_r']} "
+            f"reachF={summary['reach_fake']:.2%} reachR={summary['reach_real']:.2%} [{features}]"
         )
 
-    # Save CSV/JSON summaries
+    # Save batch summaries
     try:
         import pandas as pd
-
         df = pd.DataFrame(rows)
         for col in ("reach_fake", "reach_real"):
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
-                df.loc[df[col] > 1.0, col] = df.loc[df[col] > 1.0, col] / 100.0
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+            df.loc[df[col] > 1.0, col] /= 100.0
 
-        csv_path = batch_dir / "summary.csv"
-        df.to_csv(csv_path, index=False)
-
+        df.to_csv(batch_dir / "summary.csv", index=False)
         agg = {
-            "runs": args.runs,
-            "label": effective_label,
-            "features": features,
+            "runs": args.runs, "label": label, "features": features,
             "base_seed": base_seed,
-            "peak_f_mean": float(df["peak_f"].mean()),
-            "peak_r_mean": float(df["peak_r"].mean()),
-            "reach_fake_mean": float(df["reach_fake"].mean()),
-            "reach_real_mean": float(df["reach_real"].mean()),
-            "total_shares_f_mean": float(df["total_shares_f"].mean()),
-            "total_shares_r_mean": float(df["total_shares_r"].mean()),
-            "peak_f_std": float(df["peak_f"].std(ddof=0)),
-            "peak_r_std": float(df["peak_r"].std(ddof=0)),
-            "reach_fake_std": float(df["reach_fake"].std(ddof=0)),
-            "reach_real_std": float(df["reach_real"].std(ddof=0)),
-            "t_peak_f_mean": float(pd.to_numeric(df["t_peak_f"], errors="coerce").mean()),
-            "t_peak_r_mean": float(pd.to_numeric(df["t_peak_r"], errors="coerce").mean()),
-            "t_peak_f_std": float(pd.to_numeric(df["t_peak_f"], errors="coerce").std(ddof=0)),
-            "t_peak_r_std": float(pd.to_numeric(df["t_peak_r"], errors="coerce").std(ddof=0)),
-            "params_template": _params_to_columns(proto_p),
+            "peak_f_mean": df["peak_f"].mean(), "peak_r_mean": df["peak_r"].mean(),
+            "reach_fake_mean": df["reach_fake"].mean(), "reach_real_mean": df["reach_real"].mean(),
+            "total_shares_f_mean": df["total_shares_f"].mean(),
+            "total_shares_r_mean": df["total_shares_r"].mean(),
+            "params_template": flatten_params(proto),
         }
         save_json({"aggregate": agg, "rows": rows}, batch_dir / "summary.json")
 
-        print("\nBatch summary:")
-        print(f"CSV   → {csv_path}")
-        print(f"JSON  → {batch_dir/'summary.json'}")
-        print(
-            f"Means → peak_f={agg['peak_f_mean']:.2f}, peak_r={agg['peak_r_mean']:.2f}, "
-            f"reachF={agg['reach_fake_mean']:.2%}, reachR={agg['reach_real_mean']:.2%}"
-        )
-        print(
-            f"Times → t_peak_f≈{agg['t_peak_f_mean']:.1f}±{agg['t_peak_f_std']:.1f}, "
-            f"t_peak_r≈{agg['t_peak_r_mean']:.1f}±{agg['t_peak_r_std']:.1f}  [{features}]"
-        )
+        print("\n[✓] Batch Summary:")
+        print(f"CSV  → {batch_dir/'summary.csv'}")
+        print(f"JSON → {batch_dir/'summary.json'}")
     except Exception as e:
-        print(f"Note: could not write summary.csv / summary.json ({e}). Per-run JSONs are saved in {batch_dir}.")
+        print(f"[!] Could not save summary: {e}")
 
 
 if __name__ == "__main__":

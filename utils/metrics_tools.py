@@ -2,29 +2,32 @@ from __future__ import annotations
 from typing import Dict, Any, List, Optional
 import numpy as np
 
-def extract_run_metrics(run_data: Dict[str, Any]) -> Dict[str, Any]:
+
+def summarise(run: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Generate basic metrics from simulation time series:
-    - Peak posters
-    - Time to peak
-    - Total shares
-    - Reach (as proportion)
+    Extract core summary statistics from a single simulation run.
+    Includes peaks, timing, total shares, and overall reach for
+    both fake and real information series.
     """
-    I_f = run_data.get("I_f", []) or []
-    I_r = run_data.get("I_r", []) or []
-    shares_f = run_data.get("shares_f", []) or []
-    shares_r = run_data.get("shares_r", []) or []
+    I_f = run.get("I_f", []) or []
+    I_r = run.get("I_r", []) or []
+    shares_f = run.get("shares_f", []) or []
+    shares_r = run.get("shares_r", []) or []
 
-    reach_fake = float(run_data.get("reach_fake", 0.0) or 0.0)
-    reach_real = float(run_data.get("reach_real", 0.0) or 0.0)
-    if reach_fake > 1.0: reach_fake /= 100.0
-    if reach_real > 1.0: reach_real /= 100.0
+    reach_fake = float(run.get("reach_fake", 0.0) or 0.0)
+    reach_real = float(run.get("reach_real", 0.0) or 0.0)
 
-    peak_f = max(I_f, default=0)
-    peak_r = max(I_r, default=0)
+    # Convert percentages (>1) into proportions (0–1)
+    if reach_fake > 1.0:
+        reach_fake /= 100.0
+    if reach_real > 1.0:
+        reach_real /= 100.0
 
-    t_peak_f = I_f.index(peak_f) if peak_f in I_f else None
-    t_peak_r = I_r.index(peak_r) if peak_r in I_r else None
+    peak_f = max(I_f) if I_f else 0
+    peak_r = max(I_r) if I_r else 0
+
+    t_peak_f = (I_f.index(peak_f) if I_f and peak_f in I_f else None)
+    t_peak_r = (I_r.index(peak_r) if I_r and peak_r in I_r else None)
 
     return {
         "peak_f": peak_f,
@@ -37,29 +40,40 @@ def extract_run_metrics(run_data: Dict[str, Any]) -> Dict[str, Any]:
         "reach_real": reach_real,
     }
 
-def detect_stable_region(values: List[int], window_size: int = 10, tolerance: float = 1e-6) -> Optional[int]:
+
+def time_to_equilibrium(series: List[int], window: int = 10, tol: float = 1e-6) -> Optional[int]:
     """
-    Estimate when a series stabilizes by comparing rolling mean windows.
-    Returns the first index where stability is detected.
+    Identify when a time series stabilises by comparing consecutive
+    rolling window averages. Returns the index (time step) where
+    equilibrium first occurs, or None if stability is never reached.
     """
-    if len(values) < 2 * window_size:
+    if not series or len(series) < 2 * window:
         return None
 
-    array = np.array(values, dtype=float)
-    for t in range(window_size, len(array) - window_size):
-        prev_avg = array[t - window_size: t].mean()
-        curr_avg = array[t: t + window_size].mean()
-        if abs(curr_avg - prev_avg) <= tolerance:
+    arr = np.asarray(series, dtype=float)
+    for t in range(window, len(arr) - window):
+        prev_mean = arr[t - window:t].mean()
+        curr_mean = arr[t:t + window].mean()
+        if abs(curr_mean - prev_mean) <= tol:
             return t
     return None
 
-def estimate_equilibrium_timeseries(run_data: Dict[str, Any], window_size: int = 10, tolerance: float = 1e-6) -> Dict[str, Optional[int]]:
+
+def equilibrium_checks(run: Dict[str, Any], window: int = 10, tol: float = 1e-6) -> Dict[str, Optional[int]]:
     """
-    Run stability check on fake and real time series independently.
+    Run the stability test for both fake and real information series.
+    Returns the time step where each stabilises (if any).
     """
-    I_f = run_data.get("I_f", []) or []
-    I_r = run_data.get("I_r", []) or []
+    I_f = run.get("I_f", []) or []
+    I_r = run.get("I_r", []) or []
+
     return {
-        "t_eq_fake": detect_stable_region(I_f, window_size, tolerance),
-        "t_eq_real": detect_stable_region(I_r, window_size, tolerance),
+        "t_eq_fake": time_to_equilibrium(I_f, window=window, tol=tol),
+        "t_eq_real": time_to_equilibrium(I_r, window=window, tol=tol),
     }
+
+
+# --- Optional backward-compatible aliases (safe for older imports) ---
+extract_run_metrics = summarise
+detect_stable_region = time_to_equilibrium
+estimate_equilibrium_timeseries = equilibrium_checks

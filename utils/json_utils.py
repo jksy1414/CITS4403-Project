@@ -1,37 +1,48 @@
 from __future__ import annotations
-from pathlib import Path
 import json
+from pathlib import Path
 from typing import Any, Dict
 import numpy as np
 
-class JSONSafeEncoder(json.JSONEncoder):
+
+class NumpySafeEncoder(json.JSONEncoder):
     """
-    Custom encoder that safely converts NumPy and Path object, 
-    convert non-standard object to standard Python types.
+    JSON encoder that gracefully handles NumPy values and Path objects.
+    Converts them into plain Python types so they can be serialized safely.
     """
-    
     def default(self, obj: Any) -> Any:
+        # Handle all NumPy numeric scalars (int32, float64, etc.)
         if isinstance(obj, np.generic):
             return obj.item()
+        # Convert entire arrays to lists
         if isinstance(obj, np.ndarray):
             return obj.tolist()
+        # Represent file system paths as strings
         if isinstance(obj, Path):
             return str(obj)
+        # Fallback to default encoder
         return super().default(obj)
 
-def export_to_json(data: Dict[str, Any], destination: Path) -> None:
-    """
-    Save a dic to JSON format, ensuring directories exist, can handle NumPY types.
-    """
 
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("w", encoding="utf-8") as file:
-        json.dump(data, file, indent=2, ensure_ascii=False, cls=JSONSafeEncoder)
+def save_json(obj: Dict[str, Any], path: Path) -> None:
+    """
+    Save a Python dictionary to a JSON file.
+    Automatically creates directories if they don't exist.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(
+            obj,
+            f,
+            indent=2,
+            ensure_ascii=False,
+            cls=NumpySafeEncoder
+        )
 
 
-def import_from_json(source: Path) -> Dict[str, Any]:
+def load_json(path: Path) -> Dict[str, Any]:
     """
-    Load a JSON file and return the contents as a dic.
+    Load and parse a JSON file into a Python dictionary.
     """
-    with source.open("r", encoding="utf-8") as file:
-        return json.load(file)
+    with path.open("r", encoding="utf-8") as f:
+        return json.load(f)
