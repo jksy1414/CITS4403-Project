@@ -1,0 +1,2 @@
+mean_reachF,std_reachF,n_reachF,mean_reachR,std_reachR,n_reachR,mean_peak_f,std_peak_f,n_peak_f,mean_peak_r,std_peak_r,n_peak_r,mean_t_peak_f,std_t_peak_f,n_t_peak_f,mean_t_peak_r,std_t_peak_r,n_t_peak_r,Condition
+86.01000000000002,3.5167658587490807,20,99.96400000000001,0.09439000839183344,20,537.6,91.1750196628787,20,2215.25,51.058145388628404,20,28.75,2.7886046312580213,20,58.75,0.5501196042201808,20,M1 M2 M3 M4 M5
